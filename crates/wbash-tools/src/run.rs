@@ -96,8 +96,20 @@ pub fn record_output(
 
     result.raw_text = Some(raw.clone());
     let mut full_ref: Option<String> = None;
+    let parse_miss_pre = if let Some(p) = parsed {
+        let (_, failed, _) = util::counts_of(&p.tests);
+        let errors = p
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == wbash_core::types::Severity::Error)
+            .count();
+        !output.exit.is_success() && errors == 0 && failed == 0 && p.tests.is_empty()
+    } else {
+        !output.exit.is_success()
+    } && !raw.trim().is_empty();
     let need_handle =
-        inject_full || raw.len() > 4096 || parsed.is_some() || !output.exit.is_success();
+        (inject_full || raw.len() > 4096 || parsed.is_some() || !output.exit.is_success())
+            && !parse_miss_pre;
     if need_handle {
         let h = ctx.handles.put(label, raw.as_bytes(), "text")?;
         result.handle(HandleRef {

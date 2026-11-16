@@ -278,7 +278,19 @@ pub fn is_error_line(line: &str) -> bool {
         || l.contains("segfault")
         || l.contains("fatal")
         || l.contains("undefined reference")
-        || line.contains('✗')
+        || line.contains("✗")
+        || line.contains("error[")
+}
+
+fn is_error_context_line(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("-->")
+        || t.starts_with('|')
+        || t.starts_with("= help:")
+        || t.starts_with("= note:")
+        || t.starts_with("help:")
+        || t.starts_with("note:")
+        || (t.starts_with(' ') && t.contains('^'))
 }
 
 /// Generic compaction fallback (spec §7.5): head + error windows + tail.
@@ -315,6 +327,20 @@ pub fn compact_tail(
             continue;
         }
         if is_error_line(l) {
+            let end = (i + 5).min(lines.len());
+            for j in i..end {
+                selected.push((j, lines[j].as_str()));
+                // keep contiguous context/help block a bit longer if relevant
+                if j > i
+                    && !is_error_line(lines[j].as_str())
+                    && !is_error_context_line(lines[j].as_str())
+                    && lines[j].trim().is_empty()
+                {
+                    break;
+                }
+            }
+        } else if is_error_context_line(l) {
+            // include context lines that may be adjacent to errors outside head/tail scan
             selected.push((i, l.as_str()));
         }
     }
@@ -358,8 +384,15 @@ pub fn compact_tail(
             omitted += lines.len() - last - 1;
         }
     }
+    let full_line = format!("full: {href}");
     if need_full {
-        result.must(format!("full: {href}"));
+        if !result
+            .items
+            .iter()
+            .any(|i| i.lines.iter().any(|l| l == &full_line))
+        {
+            result.must(full_line);
+        }
     } else if omitted > 0 {
         result.must(format!("...+{omitted} lines ({href})"));
     }
