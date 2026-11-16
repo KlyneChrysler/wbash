@@ -1,9 +1,9 @@
-# w bash — Implementation-Ready Specification (v3.0 RC)
+# w bash — Implementation-Ready Specification (v3.1)
 
-**Status:** Release Candidate (implementation-ready)  
-**Version:** spec 3.0 / wire `lean@0.2` / config `schema_version=1`  
+**Status:** Implementation (v0.1 line, post-RC amendments)  
+**Version:** spec 3.1 / wire `lean@0.2` / config `schema_version=1`  
 **Date:** 2026-11-16  
-**Supersedes:** v2.1 draft
+**Supersedes:** v3.0 RC
 
 This document is the normative source for v0.1 implementation, testing, packaging, and release gating.
 
@@ -37,9 +37,9 @@ This document is the normative source for v0.1 implementation, testing, packagin
 `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, `MAY` are interpreted per RFC 2119/8174 when capitalized.
 
 ### 1.2 Goals
-1. **Efficiency:** ≥50% mean output-token reduction per task vs plain-bash baseline.
+1. **Efficiency:** ≥50% mean output-token reduction per task vs plain-bash baseline (scripted benchmark; report real `cl100k_base` as primary and chars/4 as secondary). Token efficiency is a correctness property: noisy-of-signal and lossy-of-signal outputs are failures.
 2. **Correctness:** task success ≥ baseline − 2 percentage points; turns ≤ baseline.
-3. **Safety of meaning:** 0 dropped-error incidents (errors/failures/exit/timeout signals preserved or explicitly counted in must-keep output).
+3. **Safety of meaning:** 0 dropped-error incidents (errors/failures/exit/timeout/terminal failure signals and available error/fail facts such as locations, frames, and failing-test details preserved or explicitly counted in must-keep output). Semantic `ok` requires no errors/failures; warnings must still be surfaced as counts.
 4. **Determinism:** identical `(tool,args,config_hash,observed_state,session_state)` ⇒ byte-identical output (modulo explicitly allowed measured durations in live exec).
 5. **Local-first:** no in-loop LLM, no default network telemetry.
 6. **Extensibility:** common tool normalization via declarative TOML parsers/rules without core changes.
@@ -273,10 +273,10 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 
 ### 5.7 `run`
 - **Args:** `argv` (string[], req, len≥1), `cwd?="."`, `timeout_ms?=120000` (≤`exec.max_timeout_ms`), `stdin?`, `env?` (map, keys must pass allowlist policy), `budget?`.
-- **Execution:** direct exec (no shell). Resolve `argv[0]` via PATH in exec env. `cwd` jailed. Scrub env to allowlist + configured toolchain vars + permitted per-call keys; strip secret-like keys by default.
+- **Execution:** direct exec (no shell). Resolve `argv[0]` via PATH in exec env. `cwd` jailed. Child env is allowlisted (including toolchain-relevant vars/patterns such as `CARGO_*`/`CARGO_TARGET_DIR`, Go/Python/Node/Java/Maven/Gradle families as configured) with secret-key denial enforced.
 - **Capture/limits:** stream stdout/stderr to disk up to `exec.max_output_bytes`; keep bounded tail in memory; preserve order (PTY only if required, v0.1 default pipes). On timeout send TERM then KILL to process group; return partial handle.
-- **Parsing:** parser registry MAY inject semantics-preserving flags and normalize to summary + `full: ~h`; parse failure falls back to generic compaction with `# parse_fallback`.
-- **Output:** `exit <code|timeout>, <dur>, <summary?>` + details/failures + `full: ~h` when applicable. Duration formatted as integer ms (`1234ms`) or `<s>s` with 1 decimal if ≥10s (deterministic rule: `<10000ms => Nms`, else `N.Ns`).
+- **Parsing/raw separation:** parsers MAY inject semantics-preserving flags (e.g. cargo JSON). Parsing consumes the injected/machine stream; user-visible rendered output, `raw_text`, and stored `full` handles are derived from user-relevant output with injected machine records stripped when not required to preserve signals. Parse-miss/fallback must not dump injected machine-format noise.
+- **Output:** header `exit <code|timeout>[, <dur>][, <counts/summary>]` where parsed counts are known (e.g. passed/failed/errors/warnings). Failures preserve error/fail/test facts, error-tied context/frames when available, and terminal summaries; compaction is signal-first (on error paths warning-only bodies collapsed/counted). `full: ~h` provided when content is omitted/needed for lossless access.
 - **Errors:** `exec_not_found`, `permission_denied`, `policy_denied`, `invalid_args`, `cwd_not_found`.
 
 ### 5.8 `check`
@@ -287,7 +287,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
   - Python (`pyproject.toml`/`setup.cfg`): pytest/ruff when configured/detected
   - Go (`go.mod`): `go test`/vet/build as applicable
 - **Normalization:** to `Diagnostic`/`TestResult`, dedupe `(file,line,col,code,norm_msg)`, sort severity desc then location, flood-group with count+handle.
-- **Output:** header `<E> errors, <W> warnings[, <F> failed, <P> passed]` + records/summary; handles for verbose logs.
+- **Output:** count-bearing header — `ok[, <P> passed][, <W> warnings]` when no errors/failures, else `<E> errors, <W> warnings[, <F> failed][, <P> passed]` — plus records/summary; signal-first compaction on failures, handles for omitted/verbose detail.
 - **Errors:** `no_checker_detected` (actionable hint), `policy_denied`, `outside_workspace`.
 
 ### 5.9 `git`
@@ -411,9 +411,9 @@ full: ~r7
 ### 7.5 Generic compaction (`run` fallback / `sh`)
 1. Strip ANSI/CSI/control noise and progress rewrites.
 2. Normalize whitespace runs without merging tokens/identifiers.
-3. Fold repeats differing only by numbers/hashes/timestamps into `N similar: ... last: ...`.
-4. Preserve error-indicative lines (`error|fail|failed|exception|panic|traceback|segfault|fatal|undefined reference|E\d+|✗` case-insens where applicable) + configurable context window.
-5. Compose `head + error_windows + tail` under budget; store full raw in handle.
+3. Fold repeats differing only by numbers/hashes/timestamps/templates with counts; strip common toolchain frames to concise markers.
+4. **Signal-first on errors/failures:** preserve exit/timeout facts, error/fail/panic/assert/test-failure signals and identifiers, error-tied context/frames when available, and terminal summaries (`could not compile`, `error: aborting...`, `test result: FAILED...`). On error paths, warning-only bodies/context are collapsed/counted (not emitted as blocks); warning lines are not treated as error anchors. In warning-only or clean runs, preserve compact diagnostics/counts/summaries.
+5. Compose compact selected windows under budget with explicit elisions; store user-relevant full raw in a handle when omitted/needed for lossless access. Parse-miss/fallback must not emit injected machine-format records.
 
 ### 7.6 Diagnostic normalization
 - Map to `Diagnostic/TestResult`; normalize paths relative root.
@@ -480,7 +480,7 @@ timeout_ms = 120000
 max_timeout_ms = 600000
 max_output_bytes = 10485760
 allow_shell = false
-env_allow = ["PATH","HOME","LANG","LC_ALL","TERM"]
+env_allow = ["PATH","HOME","LANG","LC_ALL","TERM","CARGO_*", "..."] # toolchain-aware patterns; secrets still denied
 kill_grace_ms = 2000
 
 [read]
@@ -497,6 +497,10 @@ post_check = true
 
 [batch]
 max_calls = 16
+
+[output]
+passthrough_tokens = 160           # small unstructured body threshold
+min_gain_pct = 15                  # require minimum token gain vs passthrough
 
 [index]
 enabled = true

@@ -3,28 +3,27 @@
 Environment: macOS arm64, rustc 1.95, release `w`, local APFS.
 Scripted tasks: 30 (`bench/tasks/*.yaml`, fixture-based fix/lint/rename flows + in-repo locate/explain/diff). Token metrics shown as chars/4 (and cl100k when `tiktoken` is available).
 
-## Latest run (release, 2026-11)
+## Latest run (release, 2026-11, `tiktoken cl100k_base`)
 
 `python3 bench/run.py --runners bash,w --w-bin target/release/w`
 
-| runner | passed | steps | tokens (est/4) | wall |
-|---|---:|---:|---:|---:|
-| bash | 30/30 | 52 | 11,638 | 18.5s |
-| w | 30/30 | 61 | 5,137 | 19.0s |
+| runner | passed | steps | tok/4 | cl100k | wall |
+|---|---:|---:|---:|---:|---:|
+| bash | 30/30 | 52 | 11,638 | 12,076 | 17.4s |
+| w | 30/30 | 61 | 5,065 | 7,610 | 18.7s |
 
-- Overall token delta (w vs bash): **-55.9%** (chars/4). With cl100k enabled by the harness, report `tokenizer` and cl100k deltas as primary comparison.
-- Correctness: 30/30 for both scripted strategies (same success checks).
+- Token delta (w vs bash): **-56.5%** (chars/4), **-37.0%** (cl100k). Correctness: 30/30 for both scripted strategies.
 
-### By kind (chars/4)
+### By kind
 
-| kind | bash passed | w passed | bash tok | w tok | bash steps | w steps |
+| kind | bash cl100k | w cl100k | bash tok/4 | w tok/4 | bash steps | w steps |
 |---|---:|---:|---:|---:|---:|---:|
-| explain | 5/5 | 5/5 | 9,480 | 921 | 10 | 5 |
-| fix_failing_test | 6/6 | 6/6 | 859 | 2,272 | 12 | 18 |
-| fix_lint_or_type | 4/4 | 4/4 | 492 | 1,129 | 8 | 12 |
-| locate | 8/8 | 8/8 | 365 | 380 | 8 | 8 |
-| rename_symbol | 4/4 | 4/4 | 189 | 298 | 8 | 12 |
-| summarize_diff | 3/3 | 3/3 | 253 | 137 | 6 | 6 |
+| explain | 9,115 | 1,222 | 9,480 | 921 | 10 | 5 |
+| fix_failing_test | 1,169 | 3,520 | 859 | 2,272 | 12 | 18 |
+| fix_lint_or_type | 684 | 1,746 | 492 | 1,057 | 8 | 12 |
+| locate | 458 | 483 | 365 | 380 | 8 | 8 |
+| rename_symbol | 296 | 443 | 189 | 298 | 8 | 12 |
+| summarize_diff | 354 | 196 | 253 | 137 | 6 | 6 |
 
 Notes:
 - Largest savings: `explain` (outline/compact reads vs full files) and `summarize_diff` (compact git output).
@@ -46,6 +45,6 @@ cargo run -p wbash-core --example calibrate -- --write-expected
 
 ## Status / gaps
 
-- Scripted token-reduction goal recovered overall (-55.9% est/4); continue validating with real cl100k and agentic end-to-end runs.
+- Scripted token-reduction goal recovered overall (-56.5% chars/4, -37.0% cl100k); explain/diff/search-class wins are strong, while scripted fix/lint/rename flows remain step- and token-heavier than direct bash edits and need further strategy/output optimization and agentic validation.
 - Agentic E2E turns/retries/model-token comparison and compactor baseline: **not yet run** (requires model/agent environment and credentials).
 - Release ops pending: tag/artifacts, `dist/w-bash.rb` checksums, crates.io publish decisions.
