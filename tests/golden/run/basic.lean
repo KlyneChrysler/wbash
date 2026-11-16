@@ -1,2 +1,2 @@
-exit 0, 0ms
+exit 0
 hi

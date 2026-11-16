@@ -265,14 +265,16 @@ impl Tool for RunTool {
             a.env.as_ref(),
             true,
         )?;
-        let mut result = ToolResult::new(
-            "run",
+        let header = if run.output.duration_ms >= 1000 {
             format!(
                 "{}, {}",
                 exit_text(&run.output.exit),
                 format_duration_ms(run.output.duration_ms)
-            ),
-        );
+            )
+        } else {
+            exit_text(&run.output.exit)
+        };
+        let mut result = ToolResult::new("run", header);
         record_output(
             &mut result,
             ctx,
@@ -349,14 +351,16 @@ impl Tool for ShTool {
             None,
             false,
         )?;
-        let mut result = ToolResult::new(
-            "sh",
+        let header = if run.output.duration_ms >= 1000 {
             format!(
                 "{}, {}",
                 exit_text(&run.output.exit),
                 format_duration_ms(run.output.duration_ms)
-            ),
-        );
+            )
+        } else {
+            exit_text(&run.output.exit)
+        };
+        let mut result = ToolResult::new("sh", header);
         record_output(&mut result, ctx, &run.output, None, "sh", true)?;
         result.meta.counts.insert("shell".into(), 1);
         Ok(result)

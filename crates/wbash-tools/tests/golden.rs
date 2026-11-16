@@ -146,8 +146,9 @@ fn extract_handle(text: &str) -> String {
         .unwrap_or_default()
 }
 fn normalize_ms(text: &str) -> String {
-    let re = regex::Regex::new(r", \d+(ms|s|m)").unwrap();
-    re.replace(text, ", 0ms").to_string()
+    // durations >=1s are shown; <1s omitted in headers. Keep any shown duration stable.
+    let re = regex::Regex::new(r", \d+(\.\d+)?(ms|s|m)").unwrap();
+    re.replace(text, ", <dur>").to_string()
 }
 fn normalize_git(text: &str) -> String {
     let re = regex::Regex::new(r"(?m)^[0-9a-f]{7,40} \d{4}-\d{2}-\d{2} ").unwrap();

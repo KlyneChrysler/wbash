@@ -148,7 +148,7 @@ fn tool_invariants() {
         json!({"argv": ["sh", "-c", "echo out; echo 'error: boom' >&2; exit 3"]}),
     );
     assert_eq!(run.cli_code, 1);
-    assert!(run.text.starts_with("exit 3,"), "{}", run.text);
+    assert!(run.text.starts_with("exit 3"), "{}", run.text);
     assert!(run.text.contains("error: boom"), "{}", run.text);
     assert!(run.text.contains("full: ~"), "{}", run.text);
     let sh = call(&mut d, "sh", json!({"command": "echo nope"}));
