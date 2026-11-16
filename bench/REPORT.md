@@ -3,7 +3,7 @@
 Environment: macOS arm64, rustc 1.95, release `w`, local APFS.
 Scripted tasks: 30 (`bench/tasks/*.yaml`, fixture-based fix/lint/rename flows + in-repo locate/explain/diff). Token metrics shown as chars/4 (and cl100k when `tiktoken` is available).
 
-## Latest run (release, 2026-11, scripted optimized `w` flows, `tiktoken cl100k_base`)
+## Baseline v0.2.0 (release, 2026-11, scripted optimized `w` flows, `tiktoken cl100k_base`)
 
 `python3 bench/run.py --runners bash,w --w-bin target/release/w`
 

@@ -1,0 +1,1055 @@
+{
+  "generated_at": "2026-11-16T13:43:41Z",
+  "tokenizer": "cl100k_base",
+  "summary": {
+    "bash": {
+      "tasks": 30,
+      "passed": 30,
+      "tokens_est": 11669,
+      "tokens_cl100k": 12093,
+      "steps": 52,
+      "wall_ms": 21944,
+      "by_kind": {
+        "explain": {
+          "tasks": 5,
+          "passed": 5,
+          "tokens_est": 9511,
+          "tokens_cl100k": 9132,
+          "steps": 10
+        },
+        "fix_failing_test": {
+          "tasks": 6,
+          "passed": 6,
+          "tokens_est": 859,
+          "tokens_cl100k": 1169,
+          "steps": 12
+        },
+        "fix_lint_or_type": {
+          "tasks": 4,
+          "passed": 4,
+          "tokens_est": 492,
+          "tokens_cl100k": 684,
+          "steps": 8
+        },
+        "locate": {
+          "tasks": 8,
+          "passed": 8,
+          "tokens_est": 365,
+          "tokens_cl100k": 458,
+          "steps": 8
+        },
+        "rename_symbol": {
+          "tasks": 4,
+          "passed": 4,
+          "tokens_est": 189,
+          "tokens_cl100k": 296,
+          "steps": 8
+        },
+        "summarize_diff": {
+          "tasks": 3,
+          "passed": 3,
+          "tokens_est": 253,
+          "tokens_cl100k": 354,
+          "steps": 6
+        }
+      }
+    },
+    "w": {
+      "tasks": 30,
+      "passed": 30,
+      "tokens_est": 3205,
+      "tokens_cl100k": 4403,
+      "steps": 51,
+      "wall_ms": 21529,
+      "by_kind": {
+        "explain": {
+          "tasks": 5,
+          "passed": 5,
+          "tokens_est": 921,
+          "tokens_cl100k": 1224,
+          "steps": 5
+        },
+        "fix_failing_test": {
+          "tasks": 6,
+          "passed": 6,
+          "tokens_est": 1171,
+          "tokens_cl100k": 1610,
+          "steps": 12
+        },
+        "fix_lint_or_type": {
+          "tasks": 4,
+          "passed": 4,
+          "tokens_est": 250,
+          "tokens_cl100k": 367,
+          "steps": 8
+        },
+        "locate": {
+          "tasks": 8,
+          "passed": 8,
+          "tokens_est": 380,
+          "tokens_cl100k": 483,
+          "steps": 8
+        },
+        "rename_symbol": {
+          "tasks": 4,
+          "passed": 4,
+          "tokens_est": 346,
+          "tokens_cl100k": 523,
+          "steps": 12
+        },
+        "summarize_diff": {
+          "tasks": 3,
+          "passed": 3,
+          "tokens_est": 137,
+          "tokens_cl100k": 196,
+          "steps": 6
+        }
+      }
+    }
+  },
+  "results": [
+    {
+      "task": "locate_resolve",
+      "kind": "locate",
+      "runner": "bash",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 51,
+      "tokens_cl100k": 63,
+      "wall_ms": 41
+    },
+    {
+      "task": "locate_resolve",
+      "kind": "locate",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 53,
+      "tokens_cl100k": 66,
+      "wall_ms": 138
+    },
+    {
+      "task": "locate_render_tree",
+      "kind": "locate",
+      "runner": "bash",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 22,
+      "tokens_cl100k": 27,
+      "wall_ms": 25
+    },
+    {
+      "task": "locate_render_tree",
+      "kind": "locate",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 25,
+      "tokens_cl100k": 31,
+      "wall_ms": 32
+    },
+    {
+      "task": "locate_readseen",
+      "kind": "locate",
+      "runner": "bash",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 24,
+      "tokens_cl100k": 28,
+      "wall_ms": 19
+    },
+    {
+      "task": "locate_readseen",
+      "kind": "locate",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 27,
+      "tokens_cl100k": 32,
+      "wall_ms": 29
+    },
+    {
+      "task": "locate_parse_cargo",
+      "kind": "locate",
+      "runner": "bash",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 39,
+      "tokens_cl100k": 51,
+      "wall_ms": 31
+    },
+    {
+      "task": "locate_parse_cargo",
+      "kind": "locate",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 42,
+      "tokens_cl100k": 55,
+      "wall_ms": 31
+    },
+    {
+      "task": "locate_mcp_handle",
+      "kind": "locate",
+      "runner": "bash",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 76,
+      "tokens_cl100k": 93,
+      "wall_ms": 18
+    },
+    {
+      "task": "locate_mcp_handle",
+      "kind": "locate",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 77,
+      "tokens_cl100k": 95,
+      "wall_ms": 30
+    },
+    {
+      "task": "locate_handle_put",
+      "kind": "locate",
+      "runner": "bash",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 40,
+      "tokens_cl100k": 55,
+      "wall_ms": 19
+    },
+    {
+      "task": "locate_handle_put",
+      "kind": "locate",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 42,
+      "tokens_cl100k": 58,
+      "wall_ms": 26
+    },
+    {
+      "task": "locate_schema_budget",
+      "kind": "locate",
+      "runner": "bash",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 70,
+      "tokens_cl100k": 85,
+      "wall_ms": 20
+    },
+    {
+      "task": "locate_schema_budget",
+      "kind": "locate",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 68,
+      "tokens_cl100k": 86,
+      "wall_ms": 27
+    },
+    {
+      "task": "locate_tier_gate",
+      "kind": "locate",
+      "runner": "bash",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 43,
+      "tokens_cl100k": 56,
+      "wall_ms": 19
+    },
+    {
+      "task": "locate_tier_gate",
+      "kind": "locate",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 46,
+      "tokens_cl100k": 60,
+      "wall_ms": 25
+    },
+    {
+      "task": "explain_dispatch",
+      "kind": "explain",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 1918,
+      "tokens_cl100k": 1728,
+      "wall_ms": 28
+    },
+    {
+      "task": "explain_dispatch",
+      "kind": "explain",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 152,
+      "tokens_cl100k": 219,
+      "wall_ms": 30
+    },
+    {
+      "task": "explain_parsers",
+      "kind": "explain",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 1920,
+      "tokens_cl100k": 1774,
+      "wall_ms": 31
+    },
+    {
+      "task": "explain_parsers",
+      "kind": "explain",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 259,
+      "tokens_cl100k": 354,
+      "wall_ms": 29
+    },
+    {
+      "task": "explain_util",
+      "kind": "explain",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 1876,
+      "tokens_cl100k": 1870,
+      "wall_ms": 29
+    },
+    {
+      "task": "explain_util",
+      "kind": "explain",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 246,
+      "tokens_cl100k": 292,
+      "wall_ms": 23
+    },
+    {
+      "task": "explain_cli",
+      "kind": "explain",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 1887,
+      "tokens_cl100k": 1884,
+      "wall_ms": 27
+    },
+    {
+      "task": "explain_cli",
+      "kind": "explain",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 163,
+      "tokens_cl100k": 217,
+      "wall_ms": 29
+    },
+    {
+      "task": "explain_handles",
+      "kind": "explain",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 1910,
+      "tokens_cl100k": 1876,
+      "wall_ms": 46
+    },
+    {
+      "task": "explain_handles",
+      "kind": "explain",
+      "runner": "w",
+      "ok": true,
+      "steps": 1,
+      "step_exit_codes": [
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 101,
+      "tokens_cl100k": 142,
+      "wall_ms": 25
+    },
+    {
+      "task": "diff_farewell",
+      "kind": "summarize_diff",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 85,
+      "tokens_cl100k": 119,
+      "wall_ms": 56
+    },
+    {
+      "task": "diff_farewell",
+      "kind": "summarize_diff",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 46,
+      "tokens_cl100k": 66,
+      "wall_ms": 115
+    },
+    {
+      "task": "diff_version",
+      "kind": "summarize_diff",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 84,
+      "tokens_cl100k": 117,
+      "wall_ms": 65
+    },
+    {
+      "task": "diff_version",
+      "kind": "summarize_diff",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 46,
+      "tokens_cl100k": 65,
+      "wall_ms": 128
+    },
+    {
+      "task": "diff_status",
+      "kind": "summarize_diff",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 84,
+      "tokens_cl100k": 118,
+      "wall_ms": 62
+    },
+    {
+      "task": "diff_status",
+      "kind": "summarize_diff",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 45,
+      "tokens_cl100k": 65,
+      "wall_ms": 136
+    },
+    {
+      "task": "fix_add",
+      "kind": "fix_failing_test",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 148,
+      "tokens_cl100k": 204,
+      "wall_ms": 3387
+    },
+    {
+      "task": "fix_add",
+      "kind": "fix_failing_test",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 199,
+      "tokens_cl100k": 278,
+      "wall_ms": 2076
+    },
+    {
+      "task": "fix_sub",
+      "kind": "fix_failing_test",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 148,
+      "tokens_cl100k": 204,
+      "wall_ms": 2514
+    },
+    {
+      "task": "fix_sub",
+      "kind": "fix_failing_test",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 201,
+      "tokens_cl100k": 283,
+      "wall_ms": 2272
+    },
+    {
+      "task": "fix_mul",
+      "kind": "fix_failing_test",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 148,
+      "tokens_cl100k": 204,
+      "wall_ms": 1994
+    },
+    {
+      "task": "fix_mul",
+      "kind": "fix_failing_test",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 199,
+      "tokens_cl100k": 278,
+      "wall_ms": 2015
+    },
+    {
+      "task": "fix_clamp",
+      "kind": "fix_failing_test",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 151,
+      "tokens_cl100k": 201,
+      "wall_ms": 2035
+    },
+    {
+      "task": "fix_clamp",
+      "kind": "fix_failing_test",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 202,
+      "tokens_cl100k": 272,
+      "wall_ms": 2104
+    },
+    {
+      "task": "fix_parse",
+      "kind": "fix_failing_test",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 137,
+      "tokens_cl100k": 184,
+      "wall_ms": 2115
+    },
+    {
+      "task": "fix_parse",
+      "kind": "fix_failing_test",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 190,
+      "tokens_cl100k": 256,
+      "wall_ms": 2041
+    },
+    {
+      "task": "fix_fib",
+      "kind": "fix_failing_test",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 127,
+      "tokens_cl100k": 172,
+      "wall_ms": 1974
+    },
+    {
+      "task": "fix_fib",
+      "kind": "fix_failing_test",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 180,
+      "tokens_cl100k": 243,
+      "wall_ms": 2130
+    },
+    {
+      "task": "rename_sum",
+      "kind": "rename_symbol",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 47,
+      "tokens_cl100k": 74,
+      "wall_ms": 1044
+    },
+    {
+      "task": "rename_sum",
+      "kind": "rename_symbol",
+      "runner": "w",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 85,
+      "tokens_cl100k": 130,
+      "wall_ms": 1153
+    },
+    {
+      "task": "rename_plus",
+      "kind": "rename_symbol",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 47,
+      "tokens_cl100k": 74,
+      "wall_ms": 1070
+    },
+    {
+      "task": "rename_plus",
+      "kind": "rename_symbol",
+      "runner": "w",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 87,
+      "tokens_cl100k": 129,
+      "wall_ms": 1091
+    },
+    {
+      "task": "rename_total",
+      "kind": "rename_symbol",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 47,
+      "tokens_cl100k": 74,
+      "wall_ms": 1101
+    },
+    {
+      "task": "rename_total",
+      "kind": "rename_symbol",
+      "runner": "w",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 87,
+      "tokens_cl100k": 132,
+      "wall_ms": 1111
+    },
+    {
+      "task": "rename_combine",
+      "kind": "rename_symbol",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 48,
+      "tokens_cl100k": 74,
+      "wall_ms": 1037
+    },
+    {
+      "task": "rename_combine",
+      "kind": "rename_symbol",
+      "runner": "w",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 87,
+      "tokens_cl100k": 132,
+      "wall_ms": 1062
+    },
+    {
+      "task": "lint_unused_var",
+      "kind": "fix_lint_or_type",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 128,
+      "tokens_cl100k": 167,
+      "wall_ms": 312
+    },
+    {
+      "task": "lint_unused_var",
+      "kind": "fix_lint_or_type",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 62,
+      "tokens_cl100k": 85,
+      "wall_ms": 262
+    },
+    {
+      "task": "lint_needless_mut",
+      "kind": "fix_lint_or_type",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 121,
+      "tokens_cl100k": 168,
+      "wall_ms": 223
+    },
+    {
+      "task": "lint_needless_mut",
+      "kind": "fix_lint_or_type",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 62,
+      "tokens_cl100k": 87,
+      "wall_ms": 256
+    },
+    {
+      "task": "type_return_string",
+      "kind": "fix_lint_or_type",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 121,
+      "tokens_cl100k": 166,
+      "wall_ms": 1297
+    },
+    {
+      "task": "type_return_string",
+      "kind": "fix_lint_or_type",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 53,
+      "tokens_cl100k": 79,
+      "wall_ms": 1513
+    },
+    {
+      "task": "syntax_missing_semi",
+      "kind": "fix_lint_or_type",
+      "runner": "bash",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 122,
+      "tokens_cl100k": 183,
+      "wall_ms": 1305
+    },
+    {
+      "task": "syntax_missing_semi",
+      "kind": "fix_lint_or_type",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        1,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 73,
+      "tokens_cl100k": 116,
+      "wall_ms": 1590
+    }
+  ]
+}
