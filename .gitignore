@@ -5,3 +5,4 @@
 .DS_Store
 /bench/.cache
 /bench/results
+bench/__pycache__/

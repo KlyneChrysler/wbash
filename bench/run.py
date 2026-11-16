@@ -205,13 +205,29 @@ def main() -> int:
             "tokens_est": sum(r["tokens_est"] for r in rows),
             "steps": sum(r["steps"] for r in rows),
             "wall_ms": sum(r["wall_ms"] for r in rows),
+            "by_kind": {},
         }
+        kinds = sorted({r.get("kind", "") for r in rows})
+        for k in kinds:
+            krows = [r for r in rows if r.get("kind", "") == k]
+            summary[runner]["by_kind"][k] = {
+                "tasks": len(krows),
+                "passed": sum(1 for r in krows if r["ok"]),
+                "tokens_est": sum(r["tokens_est"] for r in krows),
+                "steps": sum(r["steps"] for r in krows),
+            }
     print("\nsummary")
-    for runner, s in summary.items():
+    for runner, ssum in summary.items():
         print(
-            f"  {runner:<6} passed={s['passed']}/{s['tasks']} "
-            f"tokens={s['tokens_est']} steps={s['steps']} ms={s['wall_ms']}"
+            f"  {runner:<6} passed={ssum['passed']}/{ssum['tasks']} "
+            f"tokens={ssum['tokens_est']} steps={ssum['steps']} ms={ssum['wall_ms']}"
         )
+        for k, ks in ssum.get("by_kind", {}).items():
+            if not k:
+                continue
+            print(
+                f"    - {k:<16} passed={ks['passed']}/{ks['tasks']} tokens={ks['tokens_est']} steps={ks['steps']}"
+            )
     if "bash" in summary and "w" in summary and summary["bash"]["tokens_est"]:
         delta = 100 * (summary["w"]["tokens_est"] - summary["bash"]["tokens_est"]) / summary["bash"]["tokens_est"]
         print(f"  token delta w vs bash: {delta:+.1f}%")
