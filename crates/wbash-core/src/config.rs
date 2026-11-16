@@ -51,6 +51,27 @@ default_mod!(batch_defaults {
     max_calls: usize = 16,
 });
 
+default_mod!(output_defaults {
+    passthrough_tokens: u32 = 160,
+    min_gain_pct: u32 = 15,
+});
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutputConfig {
+    pub passthrough_tokens: u32,
+    pub min_gain_pct: u32,
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        Self {
+            passthrough_tokens: output_defaults::passthrough_tokens(),
+            min_gain_pct: output_defaults::min_gain_pct(),
+        }
+    }
+}
+
 default_mod!(index_defaults {
     enabled: bool = true,
     languages: Vec<String> = super::default_languages(),
@@ -284,6 +305,7 @@ pub struct Config {
     pub edit: EditConfig,
     pub batch: BatchConfig,
     pub index: IndexConfig,
+    pub output: OutputConfig,
     pub telemetry: TelemetryConfig,
     pub policy: PolicyConfig,
 }
@@ -300,6 +322,7 @@ impl Default for Config {
             edit: EditConfig::default(),
             batch: BatchConfig::default(),
             index: IndexConfig::default(),
+            output: OutputConfig::default(),
             telemetry: TelemetryConfig::default(),
             policy: PolicyConfig::default(),
         }

@@ -294,6 +294,8 @@ pub struct ToolResult {
     pub diagnostics: Vec<Diagnostic>,
     pub handles: Vec<HandleRef>,
     pub meta: Meta,
+    /// Optional raw/pre-compaction text for passthrough decisions (not serialized).
+    pub raw_text: Option<String>,
 }
 
 impl ToolResult {
@@ -308,6 +310,7 @@ impl ToolResult {
                 ok: true,
                 ..Default::default()
             },
+            raw_text: None,
         }
     }
 

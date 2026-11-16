@@ -32,6 +32,8 @@ fn i1_must_keep_preserved_under_tight_budget() {
             format: Format::Lean,
             handles: &mut hs,
             redactor: &red,
+            passthrough_tokens: None,
+            min_gain_pct: None,
         },
     )
     .unwrap();
@@ -49,6 +51,8 @@ fn i1_must_keep_preserved_under_tight_budget() {
             format: Format::Lean,
             handles: &mut hs2,
             redactor: &red,
+            passthrough_tokens: None,
+            min_gain_pct: None,
         },
     )
     .unwrap();
@@ -80,6 +84,8 @@ fn i2_lossless_elision_resolves() {
             format: Format::Lean,
             handles: &mut hs,
             redactor: &red,
+            passthrough_tokens: None,
+            min_gain_pct: None,
         },
     )
     .unwrap();
@@ -117,6 +123,8 @@ fn i3_determinism() {
                 format: Format::Lean,
                 handles: &mut hs,
                 redactor: &red,
+                passthrough_tokens: None,
+                min_gain_pct: None,
             },
         )
         .unwrap()
@@ -130,6 +138,8 @@ fn i3_determinism() {
                 format: Format::Lean,
                 handles: &mut hs2,
                 redactor: &red,
+                passthrough_tokens: None,
+                min_gain_pct: None,
             },
         )
         .unwrap()

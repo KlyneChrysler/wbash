@@ -168,6 +168,8 @@ impl Dispatcher {
                     format: common.format,
                     handles: &mut session.handles,
                     redactor: &self.redactor,
+                    passthrough_tokens: Some(self.config.output.passthrough_tokens),
+                    min_gain_pct: Some(self.config.output.min_gain_pct),
                 },
             )?
         };

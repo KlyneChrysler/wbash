@@ -59,6 +59,8 @@ fn core_primitives() {
             format: Format::Lean,
             handles: &mut handles,
             redactor: &redactor,
+            passthrough_tokens: None,
+            min_gain_pct: None,
         },
     )
     .unwrap();

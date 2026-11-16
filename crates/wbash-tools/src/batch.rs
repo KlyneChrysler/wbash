@@ -110,6 +110,8 @@ impl Tool for BatchTool {
                             format: Format::Lean,
                             handles: ctx.handles,
                             redactor: ctx.redactor,
+                            passthrough_tokens: None,
+                            min_gain_pct: None,
                         },
                     )?;
                     for line in rendered.text.lines() {

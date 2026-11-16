@@ -94,8 +94,11 @@ pub fn record_output(
         result.note("timed_out");
     }
 
+    result.raw_text = Some(raw.clone());
     let mut full_ref: Option<String> = None;
-    if inject_full || raw.len() > 4096 || parsed.is_some() {
+    let need_handle =
+        inject_full || raw.len() > 4096 || parsed.is_some() || !output.exit.is_success();
+    if need_handle {
         let h = ctx.handles.put(label, raw.as_bytes(), "text")?;
         result.handle(HandleRef {
             id: h.id.clone(),
@@ -151,19 +154,31 @@ pub fn record_output(
     } else if !raw.trim().is_empty() {
         if !output.exit.is_success() {
             result.note("parse_miss raw_tail");
+            util::compact_tail(result, &raw, label, ctx.handles, true)?;
         } else {
-            result.note("parse_fallback");
+            for line in raw.lines() {
+                let line = line.trim_end();
+                if !line.is_empty() {
+                    result.low(line.to_string());
+                }
+            }
         }
-        util::compact_tail(result, &raw, label, ctx.handles, !output.exit.is_success())?;
     }
 
     if let Some(id) = full_ref {
-        if !result
-            .items
-            .iter()
-            .any(|i| i.lines.iter().any(|l| l.contains(&id.to_string())))
+        if !output.exit.is_success()
+            || result
+                .items
+                .iter()
+                .any(|i| i.class == wbash_core::types::ItemClass::Low && i.lines.len() > 40)
         {
-            result.must(format!("full: {id}"));
+            if !result
+                .items
+                .iter()
+                .any(|i| i.lines.iter().any(|l| l.contains(&id.to_string())))
+            {
+                result.must(format!("full: {id}"));
+            }
         }
     }
     Ok(())

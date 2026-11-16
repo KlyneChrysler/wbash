@@ -11,6 +11,8 @@ pub struct RenderOptions<'a> {
     pub format: Format,
     pub handles: &'a mut HandleStore,
     pub redactor: &'a Redactor,
+    pub passthrough_tokens: Option<u32>,
+    pub min_gain_pct: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
