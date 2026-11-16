@@ -160,7 +160,7 @@ def main() -> int:
     ap.add_argument("--runners", default="bash,w")
     ap.add_argument("--runner", choices=["bash", "w"])
     ap.add_argument("--task", default=None)
-    ap.add_argument("--w-bin", default=str(ROOT / "target" / "debug" / "w"))
+    ap.add_argument("--w-bin", default=None)
     ap.add_argument("--timeout", type=int, default=180)
     ap.add_argument("--save-baseline", default=None)
     ap.add_argument("--json", default=None)
@@ -176,7 +176,10 @@ def main() -> int:
     if not tasks:
         print("no tasks matched", file=sys.stderr)
         return 2
-    w_bin = Path(args.w_bin).resolve()
+    w_default = ROOT / "target" / "debug" / "w"
+    if not w_default.exists():
+        w_default = ROOT / "target" / "release" / "w"
+    w_bin = Path(args.w_bin or w_default).resolve()
     if "w" in (args.runner or args.runners) and not w_bin.exists():
         print(f"missing w binary at {w_bin}; run `cargo build` first", file=sys.stderr)
         return 2

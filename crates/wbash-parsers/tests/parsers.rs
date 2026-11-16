@@ -248,3 +248,13 @@ fn go_test_package_success_summary() {
         .unwrap();
     assert_eq!(run.summary.as_deref(), Some("1 packages ok"));
 }
+
+#[test]
+fn pytest_no_tests_summary() {
+    let reg = registry();
+    let out = "collected 0 items\n\n========================= no tests ran in 0.01s =========================\n";
+    let run = reg
+        .parse(&["pytest".into(), "-q".into()], &Exit::Code(5), out, "")
+        .unwrap();
+    assert_eq!(run.summary.as_deref(), Some("pytest: no tests ran"));
+}

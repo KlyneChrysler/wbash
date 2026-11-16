@@ -772,7 +772,8 @@ fn parse_jest_like(root: &Value) -> Option<ParsedRun> {
         }
     }
     if run.tests.is_empty() {
-        return None;
+        run.summary = Some("0 tests".to_string());
+        return Some(run);
     }
     let (passed, failed, skipped) = run.counts();
     let mut parts = Vec::new();
