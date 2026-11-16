@@ -133,3 +133,31 @@ fn run_parse_miss_preserves_raw_tail_and_single_full_handle() {
     let full_count = r.text.matches("full: ~").count();
     assert_eq!(full_count, 1, "{}", r.text);
 }
+
+
+#[test]
+fn run_parse_miss_preserves_all_error_markers_in_handle() {
+    let root: PathBuf = std::env::temp_dir().join(format!("wbash-diff-rt2-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    copy_fixture(&root);
+    let cache = root.with_extension("cache");
+    let config_home = root.with_extension("config");
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_CACHE_HOME", &cache);
+    std::env::set_var("XDG_CONFIG_HOME", &config_home);
+    let mut d = Dispatcher::new(
+        Config::default(),
+        &root,
+        Arc::new(wbash_tools::registry()),
+        Arc::new(ParserRegistry::new()),
+    )
+    .unwrap();
+    d.set_session_tier("d", wbash_core::types::Tier::Execute).unwrap();
+
+    let cmd = "i=1; while [ $i -le 40 ]; do echo noise$i; i=$((i+1)); done; echo 'error: first'; echo '  --> a.rs:1:1'; echo 'error: second'; exit 7";
+    let r = d.call("run", &json!({"argv": ["sh", "-c", cmd]}), "d");
+    assert!(r.text.contains("error: first"), "{}", r.text);
+    assert!(r.text.contains("--> a.rs:1:1"), "{}", r.text);
+    assert!(r.text.contains("error: second"), "{}", r.text);
+}
