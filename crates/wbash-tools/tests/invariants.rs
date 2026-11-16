@@ -202,7 +202,7 @@ fn tool_invariants() {
             .map(|o| o.status.success())
             .unwrap_or(false)
     };
-    git(&["init", "-q"]);
+    git(&["init", "-q", "-b", "main"]);
     git(&["config", "user.email", "t@t"]);
     git(&["config", "user.name", "t"]);
     let st = call(&mut d, "git", json!({"op": "status"}));
