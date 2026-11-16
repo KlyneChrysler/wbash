@@ -1,0 +1,9 @@
+id: locate_render_tree
+kind: locate
+prompt: "Find where tree renderer is implemented."
+expect:
+  - "fn render_tree"
+bash:
+  - "grep -rn \"fn render_tree\" crates || true"
+w:
+  - "w search \"fn render_tree\" crates"

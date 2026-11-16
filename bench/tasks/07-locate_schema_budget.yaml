@@ -1,0 +1,9 @@
+id: locate_schema_budget
+kind: locate
+prompt: "Find where schema budget test is implemented."
+expect:
+  - "schema_chars"
+bash:
+  - "grep -rn \"schema_chars\" crates || true"
+w:
+  - "w search \"schema_chars\" crates"

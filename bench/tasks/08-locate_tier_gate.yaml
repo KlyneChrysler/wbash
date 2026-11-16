@@ -1,0 +1,9 @@
+id: locate_tier_gate
+kind: locate
+prompt: "Find where tier policy check is implemented."
+expect:
+  - "fn check_tier"
+bash:
+  - "grep -rn \"fn check_tier\" crates || true"
+w:
+  - "w search \"fn check_tier\" crates"

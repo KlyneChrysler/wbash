@@ -1,0 +1,163 @@
+use serde_json::json;
+use wbash_core::parsers::ParserSet;
+use wbash_core::types::{Exit, Severity, TestStatus};
+use wbash_parsers::{ParserRegistry, TomlParser};
+
+fn registry() -> ParserRegistry {
+    ParserRegistry::new()
+}
+
+#[test]
+fn cargo_compiler_and_libtest() {
+    let reg = registry();
+    let argv = vec!["cargo".to_string(), "test".to_string()];
+    let stdout = r#"{"reason":"compiler-message","message":{"level":"error","message":"no method","code":{"code":"E0599"},"spans":[{"file_name":"src/a.rs","line_start":3,"column_start":7,"is_primary":true}]}}
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
+test works ... ok
+test fails ... FAILED
+---- fails stdout ----
+assertion failed: left == right
+failures:
+"#;
+    let run = reg.parse(&argv, &Exit::Code(101), stdout, "").unwrap();
+    assert_eq!(run.parser.as_deref(), Some("cargo"));
+    assert_eq!(run.tests.len(), 2);
+    assert_eq!(run.tests[0].status, TestStatus::Pass);
+    assert_eq!(run.tests[1].status, TestStatus::Fail);
+    assert_eq!(
+        run.tests[1].message.as_deref(),
+        Some("assertion failed: left == right")
+    );
+    assert_eq!(run.diagnostics.len(), 1);
+    assert_eq!(run.diagnostics[0].severity, Severity::Error);
+    assert_eq!(run.diagnostics[0].code.as_deref(), Some("E0599"));
+}
+
+#[test]
+fn pytest_text() {
+    let reg = registry();
+    let argv = vec!["pytest".to_string(), "-q".to_string()];
+    let out = "FAILED tests/test_a.py::test_x - assert 1 == 2\n============ 1 failed, 2 passed in 0.12s ============\n";
+    let run = reg.parse(&argv, &Exit::Code(1), out, "").unwrap();
+    assert_eq!(run.tests.len(), 1);
+    assert_eq!(run.tests[0].id, "tests/test_a.py::test_x");
+    assert_eq!(run.summary.as_deref(), Some("1 failed, 2 passed"));
+}
+
+#[test]
+fn jest_and_vitest_json() {
+    let reg = registry();
+    let jest = json!({
+        "numPassedTests": 1,
+        "testResults": [{
+            "name": "/repo/src/a.test.ts",
+            "assertionResults": [
+                {"fullName": "a passes", "status": "passed"},
+                {"fullName": "a fails", "status": "failed", "failureMessages": ["Expected 1\n    at x"]}
+            ]
+        }]
+    })
+    .to_string();
+    let argv = vec!["jest".to_string(), "--json".to_string()];
+    let run = reg.parse(&argv, &Exit::Code(1), &jest, "").unwrap();
+    assert_eq!(run.tests.len(), 2);
+    assert_eq!(run.tests[1].status, TestStatus::Fail);
+    assert_eq!(run.tests[1].message.as_deref(), Some("Expected 1"));
+
+    let vitest = jest.clone();
+    let argv = vec!["vitest".to_string(), "--reporter=json".to_string()];
+    let run = reg.parse(&argv, &Exit::Code(1), &vitest, "").unwrap();
+    assert_eq!(run.tests.len(), 2);
+}
+
+#[test]
+fn tsc_eslint_ruff_go() {
+    let reg = registry();
+    let tsc = "src/a.ts(3,5): error TS2322: Type 'string' is not assignable\nsrc/b.ts:9:1 - warning TS9999: hmm\n";
+    let run = reg
+        .parse(&["tsc".to_string()], &Exit::Code(2), tsc, "")
+        .unwrap();
+    assert_eq!(run.diagnostics.len(), 2);
+    assert_eq!(run.diagnostics[0].file, "src/a.ts");
+    assert_eq!(run.diagnostics[1].severity, Severity::Warn);
+
+    let eslint = json!([{
+        "filePath": "/repo/src/a.js",
+        "messages": [{"line": 4, "column": 2, "severity": 2, "ruleId": "no-unused-vars", "message": "unused"}]
+    }])
+    .to_string();
+    let run = reg
+        .parse(
+            &["eslint".to_string(), "-f".to_string(), "json".to_string()],
+            &Exit::Code(1),
+            &eslint,
+            "",
+        )
+        .unwrap();
+    assert_eq!(run.diagnostics[0].file, "/repo/src/a.js");
+    assert_eq!(run.diagnostics[0].code.as_deref(), Some("no-unused-vars"));
+
+    let ruff = json!([{"filename": "src/a.py", "location": {"row": 7, "column": 3}, "code": "F401", "message": "unused import"}]).to_string();
+    let run = reg
+        .parse(
+            &["ruff".to_string(), "check".to_string()],
+            &Exit::Code(1),
+            &ruff,
+            "",
+        )
+        .unwrap();
+    assert_eq!(run.diagnostics[0].line, 7);
+    assert_eq!(run.diagnostics[0].severity, Severity::Warn);
+
+    let go = "--- FAIL: TestA (0.00s)\n--- PASS: TestB (0.00s)\n./a.go:12:3: undefined: x\n";
+    let run = reg
+        .parse(
+            &["go".to_string(), "test".to_string(), "./...".to_string()],
+            &Exit::Code(1),
+            go,
+            "",
+        )
+        .unwrap();
+    assert_eq!(run.tests.len(), 2);
+    assert_eq!(run.diagnostics[0].file, "a.go");
+}
+
+#[test]
+fn toml_parser_and_injection() {
+    let dir = std::env::temp_dir().join(format!("wbash-parser-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("demo.toml");
+    std::fs::write(
+        &path,
+        r#"
+schema_version = 1
+name = "demo"
+priority = 100
+[match]
+argv0 = "demo"
+argv_contains = ["run"]
+[inject]
+args = ["--json"]
+[parse]
+format = "jsonl"
+[map.test_result]
+id = "$.name"
+status = "$.state"
+message = "$.msg"
+[map.status]
+ok = "pass"
+bad = "fail"
+"#,
+    )
+    .unwrap();
+    let parser = TomlParser::load(&path).unwrap();
+    let reg = registry().with_toml(parser);
+    let argv = vec!["demo".to_string(), "run".to_string()];
+    assert_eq!(reg.inject_args(&argv), vec!["demo", "run", "--json"]);
+    let sample = "{\"name\":\"one\",\"state\":\"ok\"}\n{\"name\":\"two\",\"state\":\"bad\",\"msg\":\"boom\"}\n";
+    let run = reg.parse(&argv, &Exit::Code(1), sample, "").unwrap();
+    assert_eq!(run.parser.as_deref(), Some("demo"));
+    assert_eq!(run.tests[0].status, TestStatus::Pass);
+    assert_eq!(run.tests[1].status, TestStatus::Fail);
+    assert_eq!(run.tests[1].message.as_deref(), Some("boom"));
+}

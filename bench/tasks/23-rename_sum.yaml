@@ -1,0 +1,15 @@
+id: rename_sum
+kind: rename_symbol
+prompt: "Rename the function `old_name` to `sum` everywhere."
+fixture: "fixtures/rust_calc"
+setup:
+  - "cp variants/rename_add.rs src/lib.rs"
+  - "cp variants/rename_tests.rs tests/basic.rs"
+check: "cargo test -q"
+bash:
+  - "grep -rn old_name src tests"
+  - "perl -pi -e \"s/old_name/sum/g\" src/lib.rs tests/basic.rs"
+w:
+  - "w search old_name src tests"
+  - "w edit src/lib.rs find=\"old_name\" replace=\"sum\""
+  - "w edit tests/basic.rs find=\"old_name\" replace=\"sum\""

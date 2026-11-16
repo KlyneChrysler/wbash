@@ -1,0 +1,9 @@
+id: locate_resolve
+kind: locate
+prompt: "Find where policy path jail is implemented."
+expect:
+  - "pub fn resolve"
+bash:
+  - "grep -rn \"pub fn resolve\" crates || true"
+w:
+  - "w search \"pub fn resolve\" crates"

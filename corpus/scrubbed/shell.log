@@ -1,0 +1,22 @@
+$ cargo run --release -- --scan .
+   Compiling demo v0.1.0 (/tmp/demo)
+    Finished release [optimized] target(s) in 6.31s
+     Running `target/release/demo --scan .`
+scanning 214 files (9 directories)
+progress 10% (21/214)
+progress 20% (43/214)
+progress 30% (64/214)
+progress 40% (86/214)
+progress 50% (107/214)
+progress 60% (128/214)
+progress 70% (150/214)
+progress 80% (171/214)
+progress 90% (193/214)
+progress 100% (214/214)
+found 3 issues in 2 files
+WARN src/net/client.rs:88 timeout after 5000ms retrying
+WARN src/net/client.rs:88 timeout after 5000ms retrying
+WARN src/net/client.rs:88 timeout after 5000ms retrying
+ERROR src/db/pool.rs:41 connection refused
+$ echo $?
+1

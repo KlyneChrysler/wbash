@@ -1,0 +1,17 @@
+FAIL src/auth/session.test.ts
+  ● Session › refresh expires old token
+
+    Expected: 401
+    Received: 200
+
+      86 |   const next = await refreshToken(old);
+      87 |   const res = await request(app).get("/me").set("Authorization", next);
+    > 88 |   expect(res.status).toBe(401);
+         |                       ^
+      89 | });
+
+Test Suites: 1 failed, 3 passed, 4 total
+Tests:       1 failed, 17 passed, 18 total
+Snapshots:   0 total
+Time:        2.418 s
+Ran all test suites.

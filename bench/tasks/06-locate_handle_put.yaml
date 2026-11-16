@@ -1,0 +1,9 @@
+id: locate_handle_put
+kind: locate
+prompt: "Find where handle store insert is implemented."
+expect:
+  - "fn put"
+bash:
+  - "grep -rn \"fn put\" crates || true"
+w:
+  - "w search \"fn put\" crates"

@@ -1,0 +1,20 @@
+[32m   Compiling[0m demo v0.1.0 (/tmp/demo)
+[32m    Finished[0m dev profile [unoptimized + debuginfo] target(s) in 1.82s
+[33mwarning[0m: unused variable: `ctx`
+  [34m-->[0m src/main.rs:14:9
+   |
+14 |     let ctx = load();
+   |         ^^^ help: if this is intentional, prefix it with an underscore: `_ctx`
+   |
+   = [36mnote[0m: `#[warn(unused_variables)]` on by default
+
+running 4 tests
+test config::tests::parses ... [32mok[0m
+test auth::tests::expires ... [32mok[0m
+test db::tests::reconnect ... [31mFAILED[0m
+test api::tests::list ... [32mok[0m
+
+failures:
+    db::tests::reconnect
+
+test result: [31mFAILED[0m. 3 passed; 1 failed; 0 ignored; finished in 0.09s

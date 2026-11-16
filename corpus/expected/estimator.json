@@ -1,0 +1,20 @@
+{
+  "tokenizer": "cl100k_base",
+  "files": {
+    "ansi.log": {"tokens": 181, "estimate": 165},
+    "cargo_diag.txt": {"tokens": 176, "estimate": 153},
+    "english.md": {"tokens": 153, "estimate": 193},
+    "git_diff.txt": {"tokens": 140, "estimate": 142},
+    "go.go": {"tokens": 214, "estimate": 220},
+    "jest.log": {"tokens": 138, "estimate": 123},
+    "minified.json": {"tokens": 171, "estimate": 171},
+    "pytest.log": {"tokens": 190, "estimate": 214},
+    "python.py": {"tokens": 215, "estimate": 219},
+    "rust.rs": {"tokens": 271, "estimate": 267},
+    "shell.log": {"tokens": 222, "estimate": 208},
+    "short_lines.rs": {"tokens": 61, "estimate": 54},
+    "table.csv": {"tokens": 173, "estimate": 157},
+    "typescript.ts": {"tokens": 224, "estimate": 223},
+    "unicode.md": {"tokens": 229, "estimate": 272}
+  }
+}

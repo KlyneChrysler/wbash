@@ -1,0 +1,15 @@
+id: rename_combine
+kind: rename_symbol
+prompt: "Rename the function `old_name` to `combine` everywhere."
+fixture: "fixtures/rust_calc"
+setup:
+  - "cp variants/rename_add.rs src/lib.rs"
+  - "cp variants/rename_tests.rs tests/basic.rs"
+check: "cargo test -q"
+bash:
+  - "grep -rn old_name src tests"
+  - "perl -pi -e \"s/old_name/combine/g\" src/lib.rs tests/basic.rs"
+w:
+  - "w search old_name src tests"
+  - "w edit src/lib.rs find=\"old_name\" replace=\"combine\""
+  - "w edit tests/basic.rs find=\"old_name\" replace=\"combine\""

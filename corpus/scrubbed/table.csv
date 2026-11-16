@@ -1,0 +1,9 @@
+id,name,status,latency_ms,bytes,region,owner
+1,api-gateway,ready,12,4096,us-east-1,platform
+2,auth-service,ready,18,2048,us-east-1,identity
+3,billing-worker,degraded,842,8192,eu-west-1,payments
+4,search-indexer,ready,27,16384,us-west-2,discovery
+5,email-sender,ready,31,1024,us-east-1,notifications
+6,media-transcoder,timeout,30000,65536,ap-south-1,media
+7,recommender,ready,44,32768,eu-central-1,ml
+8,analytics-etl,ready,95,131072,us-east-1,data

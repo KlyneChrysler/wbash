@@ -1,0 +1,10 @@
+id: explain_dispatch
+kind: explain
+prompt: "Explain the dispatcher module and name its key entry points."
+expect:
+  - "call_inner"
+bash:
+  - "wc -l crates/wbash-core/src/dispatcher.rs"
+  - "sed -n \"1,240p\" crates/wbash-core/src/dispatcher.rs"
+w:
+  - "w read crates/wbash-core/src/dispatcher.rs --outline --budget 700"

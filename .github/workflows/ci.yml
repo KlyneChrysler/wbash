@@ -1,0 +1,95 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  fmt-clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets
+      - name: unit + golden + invariants + differential + schema budget
+        run: cargo test --workspace
+      - name: schema budget
+        run: cargo test -p wbash-adapters --test mcp -- --nocapture
+
+  estimator-calibration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p wbash-core --test calibration -- --nocapture
+      - name: regenerated corpus is current
+        run: |
+          cargo run -q -p wbash-core --example calibrate -- --write-expected
+          git diff --exit-code corpus/expected/estimator.json
+
+  bench-scripted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p wbash-cli
+      - run: python3 bench/run.py --runners bash,w --w-bin target/release/w --save-baseline bench/results/ci-baseline.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench/results/ci-baseline.json
+
+  perf-smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p wbash-cli
+      - run: mkdir -p bench/results
+      - name: latency gates G6-G8 (advisory)
+        run: python3 bench/perf.py --w-bin target/release/w | tee bench/results/perf.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perf-smoke
+          path: bench/results/perf.txt
+
+  fuzz-smoke:
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo fuzz build
+      - run: cargo fuzz run args -- -runs=2000
+      - run: cargo fuzz run paths -- -runs=2000
+      - run: cargo fuzz run parsers -- -runs=2000
+      - run: cargo fuzz run formatter -- -runs=2000

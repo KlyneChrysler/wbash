@@ -1,0 +1,9 @@
+id: locate_parse_cargo
+kind: locate
+prompt: "Find where cargo parser is implemented."
+expect:
+  - "fn parse_cargo"
+bash:
+  - "grep -rn \"fn parse_cargo\" crates || true"
+w:
+  - "w search \"fn parse_cargo\" crates"

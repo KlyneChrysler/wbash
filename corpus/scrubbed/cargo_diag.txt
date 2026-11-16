@@ -1,0 +1,18 @@
+error[E0599]: no method named `trim_end` found for struct `String` in the current scope
+  --> src/config.rs:42:18
+   |
+40 |     let cleaned = raw
+   |         ------- method `trim_end` not found
+41 |         .trim()
+42 |         .trim_end();
+   |          ^^^^^^^^ help: there is a method with a similar name: `trim_end_matches`
+   |
+warning: unused import: `std::io::Write`
+ --> src/main.rs:3:5
+  |
+3 | use std::io::Write;
+  |     ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+error: could not compile `demo` (lib) due to 1 previous error; 1 warning emitted

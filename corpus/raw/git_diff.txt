@@ -1,0 +1,14 @@
+diff --git a/src/session.rs b/src/session.rs
+index 7a1b2c3..9d4e5f6 100644
+--- a/src/session.rs
++++ b/src/session.rs
+@@ -18,9 +18,11 @@ impl Session {
+     pub fn refresh(&mut self, token: &str) -> Result<Token> {
+-        let old = self.tokens.remove(token);
++        let old = self.tokens.remove(token).ok_or(Error::UnknownToken)?;
++        self.revocations.insert(old.id);
+         let next = Token::issue(self.user)?;
+         self.tokens.insert(next.id, next.clone());
+         Ok(nextToken)
+     }
+ }

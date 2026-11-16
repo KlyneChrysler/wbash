@@ -1,0 +1,9 @@
+id: locate_mcp_handle
+kind: locate
+prompt: "Find where MCP request handler is implemented."
+expect:
+  - "fn handle"
+bash:
+  - "grep -rn \"fn handle\" crates || true"
+w:
+  - "w search \"fn handle\" crates"

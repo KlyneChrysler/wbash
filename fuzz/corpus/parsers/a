@@ -1,0 +1,1 @@
+{"reason":"compiler-message","message":{"level":"error","message":"x","spans":[{"file_name":"a.rs","line_start":1,"column_start":1}]}}

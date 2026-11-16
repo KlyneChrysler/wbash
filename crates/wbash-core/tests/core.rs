@@ -1,0 +1,91 @@
+use std::path::PathBuf;
+
+use wbash_core::args::parse_line_range;
+use wbash_core::config::{self, Config};
+use wbash_core::formatter::{render, RenderOptions};
+use wbash_core::handles::HandleStore;
+use wbash_core::hash;
+use wbash_core::policy;
+use wbash_core::redact::Redactor;
+use wbash_core::types::{Format, ToolResult};
+
+fn temp_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("wbash-test-{}-{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn core_primitives() {
+    let cache = temp_dir("cache");
+    std::env::set_var("XDG_CACHE_HOME", cache.join("cache-home"));
+    std::env::set_var("XDG_CONFIG_HOME", cache.join("config-home"));
+
+    assert_eq!(hash::short("0123456789abcdef0123"), "b3:0123456789abcdef");
+
+    let redactor = Redactor::new();
+    let (red, n) = redactor.redact("aws AKIAABCDEFGHIJKLMNOP and token=supersecretvalue");
+    assert!(n >= 1, "expected redaction: {red}");
+    assert!(!red.contains("AKIAABCDEFGHIJKLMNOP"));
+
+    let root = temp_dir("root");
+    let croot = root.canonicalize().unwrap();
+    std::fs::write(croot.join("a.txt"), "hello").unwrap();
+    assert!(policy::resolve(&croot, "a.txt", &[], true).is_ok());
+    assert_eq!(
+        policy::resolve(&croot, "../escape", &[], false)
+            .unwrap_err()
+            .code,
+        "outside_workspace"
+    );
+
+    let (s, e) = parse_line_range("1:99", 3).unwrap();
+    assert_eq!((s, e), (1, 3));
+
+    // Budget fitting: must-keep survives, elision is resolvable.
+    let mut result = ToolResult::new("read", "header");
+    result.must("ERROR must keep");
+    for i in 0..80 {
+        result.low(format!("line {i} {}", "x".repeat(60)));
+    }
+    let mut handles = HandleStore::open("test", &root, 3600, 10_000_000, Redactor::new()).unwrap();
+    let rendered = render(
+        &result,
+        RenderOptions {
+            budget: 64,
+            format: Format::Lean,
+            handles: &mut handles,
+            redactor: &redactor,
+        },
+    )
+    .unwrap();
+    assert!(rendered.text.contains("ERROR must keep"));
+    assert!(rendered.text.contains("...+"));
+    let id = rendered
+        .text
+        .split('(')
+        .find_map(|s| s.split(')').next().filter(|x| x.starts_with('~')))
+        .expect("elision handle")
+        .to_string();
+    let (bytes, _) = handles.get(&id).unwrap();
+    let payload = String::from_utf8(bytes).unwrap();
+    assert!(payload.starts_with("line "), "payload={payload}");
+    assert!(payload.contains("line 79 "));
+
+    // Handle gc with zero TTL.
+    let mut short = HandleStore::open("short", &root, 0, 10_000_000, Redactor::new()).unwrap();
+    let h = short.put("run", b"payload", "text").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert!(short.gc() >= 1);
+    let err = short.get(&h.id).unwrap_err();
+    assert!(err.code == "handle_not_found" || err.code == "handle_expired");
+
+    // Config trust roundtrip.
+    let cfg = Config::default();
+    cfg.validate().unwrap();
+    config::trust_root(&root).unwrap();
+    assert!(config::is_trusted(&root));
+    let abs = root.canonicalize().unwrap();
+    assert!(config::is_trusted(&abs));
+}

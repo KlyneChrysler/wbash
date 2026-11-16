@@ -1,0 +1,75 @@
+use regex::Regex;
+
+/// Best-effort secret redaction applied before wire output, handle storage,
+/// stats and audit records (spec §8.5).
+pub struct Redactor {
+    patterns: Vec<Regex>,
+    enabled: bool,
+}
+
+impl Default for Redactor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Redactor {
+    pub fn new() -> Self {
+        let patterns = [
+            // PEM private key blocks (dot matches newline via (?s)).
+            r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+            // AWS access key ids.
+            r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b",
+            // GitHub / GitLab / Slack style tokens.
+            r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_\-]{20,}|xox[abprs]-[A-Za-z0-9\-]{10,})\b",
+            // key = value style assignments in env/config-like content.
+            r#"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd|client[_-]?secret)\b\s*[:=]\s*['"]?[^\s'"]{4,}['"]?"#,
+            // URL credentials.
+            r"://[^\s/:@]+:[^\s/@]+@",
+        ]
+        .iter()
+        .filter_map(|p| Regex::new(p).ok())
+        .collect();
+        Self {
+            patterns,
+            enabled: true,
+        }
+    }
+
+    pub fn disabled() -> Self {
+        Self {
+            patterns: Vec::new(),
+            enabled: false,
+        }
+    }
+
+    /// Returns redacted text and the number of substitutions.
+    pub fn redact(&self, text: &str) -> (String, u32) {
+        if !self.enabled {
+            return (text.to_string(), 0);
+        }
+        let mut out = text.to_string();
+        let mut count = 0u32;
+        for re in &self.patterns {
+            let matches = re.find_iter(&out).count() as u32;
+            if matches > 0 {
+                out = re.replace_all(&out, "[REDACTED]").into_owned();
+                count += matches;
+            }
+        }
+        (out, count)
+    }
+
+    /// Secret-looking environment variable names are stripped from child envs.
+    pub fn is_secret_key(key: &str) -> bool {
+        let k = key.to_ascii_lowercase();
+        k.contains("secret")
+            || k.contains("token")
+            || k.contains("password")
+            || k.contains("passwd")
+            || k.contains("api_key")
+            || k.contains("apikey")
+            || k.contains("credential")
+            || k.contains("private_key")
+    }
+}

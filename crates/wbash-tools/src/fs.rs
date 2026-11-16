@@ -1,0 +1,1071 @@
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+use serde_json::{json, Value};
+use similar::{ChangeTag, TextDiff};
+
+use wbash_core::args::{parse_args, parse_line_range};
+use wbash_core::error::{Result, WErr};
+use wbash_core::hash;
+use wbash_core::registry::{Tool, ToolContext};
+use wbash_core::types::{
+    now_ms, Diagnostic, HandleRef, Item, ItemClass, ReadSeen, Scope, Severity, Tier, ToolResult,
+};
+use wbash_index::Workspace;
+
+use crate::util;
+
+// ---------------------------------------------------------------------------
+// tree
+// ---------------------------------------------------------------------------
+
+pub struct TreeTool;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TreeArgs {
+    #[serde(default = "dot")]
+    path: String,
+    #[serde(default = "two")]
+    depth: u32,
+    glob: Option<String>,
+    #[serde(default)]
+    sizes: bool,
+}
+
+fn dot() -> String {
+    ".".to_string()
+}
+fn two() -> u32 {
+    2
+}
+
+impl Tool for TreeTool {
+    fn name(&self) -> &'static str {
+        "tree"
+    }
+    fn description(&self) -> &'static str {
+        "List workspace files as an indented tree."
+    }
+    fn min_tier(&self) -> Tier {
+        Tier::ReadOnly
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "default": "."},
+                "depth": {"type": "integer", "minimum": 0, "default": 2},
+                "glob": {"type": "string"},
+                "sizes": {"type": "boolean", "default": false}
+            },
+            "additionalProperties": false
+        })
+    }
+    fn call(&self, args: &Value, ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
+        let a: TreeArgs = parse_args(args.clone(), "tree", "pass path, depth, glob or sizes")?;
+        let base = ctx.resolve(&a.path, true)?;
+        if !base.is_dir() {
+            return Err(WErr::with_hint(
+                "not_a_directory",
+                format!("'{}' is not a directory", a.path),
+                "use `w read path=<file>` for files",
+            ));
+        }
+        let gs = util::globset(a.glob.as_deref())?;
+        let base_rel = ctx.rel(&base);
+        let walk = ctx.workspace.walk_filtered(Some(&|rel| {
+            util::under(rel, &base_rel) && util::matches_glob(gs.as_ref(), rel)
+        }));
+
+        let mut root = DirNode::default();
+        for f in &walk.files {
+            let rel = f
+                .rel
+                .strip_prefix(&base_rel)
+                .unwrap_or(&f.rel)
+                .trim_start_matches('/');
+            let rel = if rel.is_empty() {
+                f.rel.clone()
+            } else {
+                rel.to_string()
+            };
+            let parts: Vec<&str> = rel.split('/').filter(|p| !p.is_empty()).collect();
+            if parts.is_empty() {
+                continue;
+            }
+            root.insert(&parts, f.size);
+        }
+
+        let mut result = ToolResult::new(
+            "tree",
+            format!(
+                "{}/ ({} files, {} dirs)",
+                util::display_path(ctx.root, &base),
+                root.file_count(),
+                root.dir_count()
+            ),
+        );
+        if walk.truncated {
+            result.note("tree_truncated");
+        }
+        let max_depth = if a.depth == 0 {
+            usize::MAX
+        } else {
+            a.depth as usize
+        };
+        render_tree(&mut result, &root, 0, max_depth, a.sizes, ctx)?;
+        result
+            .meta
+            .counts
+            .insert("files".into(), root.file_count() as i64);
+        result
+            .meta
+            .counts
+            .insert("dirs".into(), root.dir_count() as i64);
+        Ok(result)
+    }
+}
+
+#[derive(Default)]
+struct DirNode {
+    dirs: std::collections::BTreeMap<String, DirNode>,
+    files: Vec<(String, u64)>,
+}
+
+impl DirNode {
+    fn insert(&mut self, parts: &[&str], size: u64) {
+        if parts.len() == 1 {
+            self.files.push((parts[0].to_string(), size));
+        } else {
+            self.dirs
+                .entry(parts[0].to_string())
+                .or_default()
+                .insert(&parts[1..], size);
+        }
+    }
+
+    fn file_count(&self) -> usize {
+        self.files.len() + self.dirs.values().map(DirNode::file_count).sum::<usize>()
+    }
+
+    fn dir_count(&self) -> usize {
+        self.dirs.len() + self.dirs.values().map(DirNode::dir_count).sum::<usize>()
+    }
+}
+
+fn render_tree(
+    result: &mut ToolResult,
+    node: &DirNode,
+    level: usize,
+    max_depth: usize,
+    sizes: bool,
+    ctx: &mut ToolContext<'_>,
+) -> Result<()> {
+    let indent = "  ".repeat(level);
+    for (name, child) in &node.dirs {
+        let count = child.file_count();
+        let over_depth = level + 1 >= max_depth;
+        if over_depth || child.files.len() > 40 || child.dir_count() > 40 {
+            result.push(Item::new(
+                ItemClass::High,
+                5.0,
+                vec![format!("{indent}{name}/ ({count})")],
+            ));
+        } else {
+            result.push(Item::new(
+                ItemClass::High,
+                5.0,
+                vec![format!("{indent}{name}/")],
+            ));
+            render_tree(result, child, level + 1, max_depth, sizes, ctx)?;
+        }
+    }
+    let mut files = node.files.clone();
+    files.sort();
+    const INLINE_MAX: usize = 200;
+    let (shown, rest) = if files.len() > INLINE_MAX {
+        files.split_at(INLINE_MAX)
+    } else {
+        (files.as_slice(), [].as_slice())
+    };
+    for (name, size) in shown {
+        let line = if sizes {
+            format!("{indent}{name} ({})", human_size(*size))
+        } else {
+            format!("{indent}{name}")
+        };
+        result.low(line);
+    }
+    if !rest.is_empty() {
+        let lines: Vec<String> = rest.iter().map(|(n, _)| format!("{indent}{n}")).collect();
+        let h = ctx
+            .handles
+            .put("tree", lines.join("\n").as_bytes(), "text")?;
+        result.must(format!("{indent}...+{} more ({})", rest.len(), h.id));
+        result.handle(HandleRef {
+            id: h.id.clone(),
+            kind: h.kind.clone(),
+            bytes: h.bytes,
+            hash: h.hash.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn human_size(n: u64) -> String {
+    if n < 1024 {
+        format!("{n}B")
+    } else if n < 1024 * 1024 {
+        format!("{:.1}KB", n as f64 / 1024.0)
+    } else {
+        format!("{:.1}MB", n as f64 / (1024.0 * 1024.0))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// read
+// ---------------------------------------------------------------------------
+
+pub struct ReadTool;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadArgs {
+    path: String,
+    lines: Option<String>,
+    symbol: Option<String>,
+    #[serde(default)]
+    outline: bool,
+    expect_hash: Option<String>,
+}
+
+impl Tool for ReadTool {
+    fn name(&self) -> &'static str {
+        "read"
+    }
+    fn description(&self) -> &'static str {
+        "Read a file or range; returns unchanged when hash-verified."
+    }
+    fn min_tier(&self) -> Tier {
+        Tier::ReadOnly
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "lines": {"type": "string"},
+                "symbol": {"type": "string"},
+                "outline": {"type": "boolean", "default": false},
+                "expect_hash": {"type": "string"}
+            },
+            "required": ["path"],
+            "additionalProperties": false
+        })
+    }
+    fn call(&self, args: &Value, ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
+        let a: ReadArgs = parse_args(
+            args.clone(),
+            "read",
+            "pass path plus optional lines, symbol, outline, expect_hash",
+        )?;
+        let abs = ctx.resolve(&a.path, true)?;
+        if abs.is_dir() {
+            return Err(WErr::with_hint(
+                "is_directory",
+                format!("'{}' is a directory", a.path),
+                "use `w tree path=<dir>`",
+            ));
+        }
+        let file = wbash_index::read_text(&abs)
+            .map_err(|e| WErr::new("not_found", format!("cannot read '{}': {e}", a.path)))?;
+        let full_hex = hash::hash_bytes(file.content.as_bytes());
+        let short = hash::short(&full_hex);
+        if let Some(expect) = &a.expect_hash {
+            let ok = expect == &short
+                || expect == &full_hex
+                || full_hex.starts_with(expect.trim_start_matches("b3:"));
+            if !ok {
+                return Err(WErr::with_hint(
+                    "hash_mismatch",
+                    format!("current={short}"),
+                    "re-read the file before editing",
+                ));
+            }
+        }
+        if file.binary {
+            if a.symbol.is_some() || a.lines.is_some() || a.outline {
+                return Err(WErr::with_hint(
+                    "binary_unsupported",
+                    format!("'{}' is binary", a.path),
+                    "read binary files without lines/symbol/outline filters",
+                ));
+            }
+            let mut r = ToolResult::new(
+                "read",
+                format!("binary {} {} bytes {short}", a.path, file.size),
+            );
+            r.meta.counts.insert("bytes".into(), file.size as i64);
+            return Ok(r);
+        }
+
+        let display = ctx.rel(&abs);
+        let text = file.content;
+        let lines: Vec<&str> = text.lines().collect();
+        let line_count = lines.len();
+        let mtime_ms = std::fs::metadata(&abs)
+            .map(|m| wbash_core::types::file_mtime_ms(&m))
+            .unwrap_or(0);
+
+        if let Some(sym) = &a.symbol {
+            let found = ctx.symbols.find_symbol(&abs, &text, sym).ok_or_else(|| {
+                WErr::with_hint(
+                    "symbol_not_found",
+                    format!("symbol '{sym}' in {display}"),
+                    format!("try: w search pattern={sym} mode=symbol"),
+                )
+            })?;
+            let start = found.start_line.max(1).min(line_count.max(1));
+            let end = found.end_line.max(start).min(line_count.max(1));
+            let mut r = ToolResult::new(
+                "read",
+                format!("{display}:{start}-{end} {} ({short})", found.name),
+            );
+            for i in start..=end {
+                r.low(format!("{i}: {}", lines[i - 1]));
+            }
+            r.meta
+                .counts
+                .insert("lines".into(), (end - start + 1) as i64);
+            record_read(
+                ctx,
+                &display,
+                Scope::Lines {
+                    start: start as u32,
+                    end: end as u32,
+                },
+                &full_hex,
+                &short,
+                mtime_ms,
+                file.size,
+                &text,
+                Some(&found.name),
+            )?;
+            return Ok(r);
+        }
+
+        if a.outline {
+            let outline = ctx.symbols.symbols(&abs, &text);
+            let mut r = ToolResult::new(
+                "read",
+                format!(
+                    "{display} outline ({} symbols, {short})",
+                    outline.symbols.len()
+                ),
+            );
+            if outline.heuristic {
+                r.note("heuristic_outline");
+            }
+            for s in &outline.symbols {
+                let pad = " ".repeat(s.indent.min(40));
+                r.low(format!("{pad}{}: {} {}", s.start_line, s.kind, s.name));
+            }
+            r.meta
+                .counts
+                .insert("symbols".into(), outline.symbols.len() as i64);
+            record_read(
+                ctx,
+                &display,
+                Scope::Outline,
+                &full_hex,
+                &short,
+                mtime_ms,
+                file.size,
+                &text,
+                None,
+            )?;
+            return Ok(r);
+        }
+
+        if let Some(spec) = &a.lines {
+            let (start, end) = parse_line_range(spec, line_count)?;
+            let mut r = ToolResult::new("read", format!("{display}:{start}-{end} ({short})"));
+            if spec_mismatch(spec, start, end, line_count) {
+                r.note(format!("clamped {spec} -> {start}:{end}"));
+            }
+            for i in start..=end {
+                r.low(format!("{i}: {}", lines[i - 1]));
+            }
+            r.meta
+                .counts
+                .insert("lines".into(), (end - start + 1) as i64);
+            record_read(
+                ctx,
+                &display,
+                Scope::Lines {
+                    start: start as u32,
+                    end: end as u32,
+                },
+                &full_hex,
+                &short,
+                mtime_ms,
+                file.size,
+                &text,
+                None,
+            )?;
+            return Ok(r);
+        }
+
+        let max_full = ctx.config.read.max_full_lines as usize;
+        let scope = if line_count <= max_full {
+            Scope::Full
+        } else {
+            Scope::Lines {
+                start: 1,
+                end: ctx.config.read.head_lines,
+            }
+        };
+        let ttl = ctx.config.session.ledger_ttl_secs;
+        let now = now_ms();
+        let previous = ctx.ledger.read_entry(&display, scope, ttl, now).cloned();
+        if let Some(prev) = &previous {
+            if prev.full_hash == full_hex {
+                let mut r = ToolResult::new("read", format!("unchanged {display} ({short})"));
+                r.meta.counts.insert("lines".into(), line_count as i64);
+                return Ok(r);
+            }
+        }
+
+        let mut r = ToolResult::new(
+            "read",
+            if line_count <= max_full {
+                format!("{display} ({line_count} lines, {short})")
+            } else {
+                format!(
+                    "{display} ({line_count} lines, showing {} + outline, {short})",
+                    ctx.config.read.head_lines
+                )
+            },
+        );
+
+        if line_count > max_full {
+            let outline = ctx.symbols.symbols(&abs, &text);
+            if outline.heuristic {
+                r.note("heuristic_outline");
+            }
+            for s in &outline.symbols {
+                let pad = " ".repeat(s.indent.min(40));
+                r.push(Item::new(
+                    ItemClass::High,
+                    4.0,
+                    vec![format!("{pad}{}: {} {}", s.start_line, s.kind, s.name)],
+                ));
+            }
+            let head = (ctx.config.read.head_lines as usize).min(line_count);
+            for (i, line) in lines.iter().take(head).enumerate() {
+                r.low(format!("{}: {}", i + 1, line));
+            }
+            let h = ctx.handles.put("read", text.as_bytes(), "text")?;
+            r.must(format!("...+{} lines ({})", line_count - head, h.id));
+            r.handle(HandleRef {
+                id: h.id.clone(),
+                kind: h.kind.clone(),
+                bytes: h.bytes,
+                hash: h.hash.clone(),
+            });
+            record_read_snapshot(
+                ctx,
+                &display,
+                scope,
+                &full_hex,
+                &short,
+                mtime_ms,
+                file.size,
+                &text,
+                Some(h.id),
+            )?;
+            r.meta.counts.insert("lines".into(), line_count as i64);
+            return Ok(r);
+        }
+
+        let full_text_est = wbash_core::estimator::estimate_text(&text);
+        let mut used_diff = false;
+        if let Some(prev) = &previous {
+            if let Some(snap) = &prev.snapshot_ref {
+                if let Ok((bytes, _)) = ctx.handles.get(snap) {
+                    let old = String::from_utf8_lossy(&bytes).into_owned();
+                    let diff_lines = render_diff(&old, &text);
+                    if wbash_core::estimator::estimate_lines(&diff_lines) < full_text_est {
+                        used_diff = true;
+                        r.header = format!("{display} diff ({short})");
+                        for line in diff_lines {
+                            r.push(Item::new(ItemClass::High, 6.0, vec![line]));
+                        }
+                    }
+                }
+            }
+        }
+        if !used_diff {
+            for (i, line) in lines.iter().enumerate() {
+                r.low(format!("{}: {}", i + 1, line));
+            }
+        }
+        let snapshot = ctx.handles.put("read_snapshot", text.as_bytes(), "text")?;
+        record_read_snapshot(
+            ctx,
+            &display,
+            scope,
+            &full_hex,
+            &short,
+            mtime_ms,
+            file.size,
+            &text,
+            Some(snapshot.id),
+        )?;
+        r.meta.counts.insert("lines".into(), line_count as i64);
+        Ok(r)
+    }
+}
+
+fn spec_mismatch(spec: &str, start: usize, end: usize, len: usize) -> bool {
+    let (a, b) = spec.split_once(':').unwrap_or(("", ""));
+    let req_start = a.trim().parse::<usize>().unwrap_or(1);
+    let req_end = b.trim().parse::<usize>().unwrap_or(len);
+    req_start != start || req_end != end
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_read(
+    ctx: &mut ToolContext<'_>,
+    display: &str,
+    scope: Scope,
+    full_hex: &str,
+    short: &str,
+    mtime_ms: i64,
+    size: u64,
+    text: &str,
+    _symbol: Option<&str>,
+) -> Result<()> {
+    let snapshot = ctx.handles.put("read_snapshot", text.as_bytes(), "text")?;
+    record_read_snapshot(
+        ctx,
+        display,
+        scope,
+        full_hex,
+        short,
+        mtime_ms,
+        size,
+        text,
+        Some(snapshot.id),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_read_snapshot(
+    ctx: &mut ToolContext<'_>,
+    display: &str,
+    scope: Scope,
+    full_hex: &str,
+    short: &str,
+    mtime_ms: i64,
+    size: u64,
+    _text: &str,
+    snapshot_ref: Option<String>,
+) -> Result<()> {
+    ctx.ledger.record_read(
+        display,
+        scope,
+        ReadSeen {
+            full_hash: full_hex.to_string(),
+            short: short.to_string(),
+            mtime_ms,
+            size,
+            scope: scope.key(),
+            snapshot_ref,
+            shown_ms: now_ms(),
+        },
+    );
+    Ok(())
+}
+
+fn render_diff(old: &str, new: &str) -> Vec<String> {
+    let diff = TextDiff::from_lines(old, new);
+    let mut out = Vec::new();
+    let mut old_line;
+    let mut new_line;
+    for group in diff.grouped_ops(3) {
+        let Some(first) = group.first() else { continue };
+        old_line = first.old_range().start + 1;
+        new_line = first.new_range().start + 1;
+        let old_start = first.old_range().start + 1;
+        let old_len = group.iter().map(|op| op.old_range().len()).sum::<usize>();
+        let new_start = first.new_range().start + 1;
+        let new_len = group.iter().map(|op| op.new_range().len()).sum::<usize>();
+        out.push(format!(
+            "@@ -{old_start},{old_len} +{new_start},{new_len} @@"
+        ));
+        for op in group {
+            for change in diff.iter_changes(&op) {
+                let value = change.value().trim_end_matches('\n');
+                match change.tag() {
+                    ChangeTag::Delete => {
+                        out.push(format!("-{old_line}: {value}"));
+                        old_line += 1;
+                    }
+                    ChangeTag::Insert => {
+                        out.push(format!("+{new_line}: {value}"));
+                        new_line += 1;
+                    }
+                    ChangeTag::Equal => {
+                        out.push(format!(" {new_line}: {value}"));
+                        old_line += 1;
+                        new_line += 1;
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// edit
+// ---------------------------------------------------------------------------
+
+pub struct EditTool;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EditArgs {
+    path: String,
+    find: Option<String>,
+    replace: Option<String>,
+    lines: Option<String>,
+    create: Option<bool>,
+    content: Option<String>,
+    overwrite: Option<bool>,
+    delete: Option<bool>,
+    expect_hash: Option<String>,
+}
+
+impl Tool for EditTool {
+    fn name(&self) -> &'static str {
+        "edit"
+    }
+    fn description(&self) -> &'static str {
+        "Exact literal edit, line splice, create or delete; atomic write."
+    }
+    fn min_tier(&self) -> Tier {
+        Tier::WriteWorkspace
+    }
+    fn destructive(&self) -> bool {
+        true
+    }
+    fn idempotent(&self) -> bool {
+        false
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "find": {"type": "string"},
+                "replace": {"type": "string"},
+                "lines": {"type": "string"},
+                "create": {"type": "boolean"},
+                "content": {"type": "string"},
+                "overwrite": {"type": "boolean", "default": false},
+                "delete": {"type": "boolean"},
+                "expect_hash": {"type": "string"}
+            },
+            "required": ["path"],
+            "additionalProperties": false
+        })
+    }
+    fn call(&self, args: &Value, ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
+        let a: EditArgs = parse_args(
+            args.clone(),
+            "edit",
+            "use one of find+replace, lines+replace, create+content, delete",
+        )?;
+        let abs = ctx.resolve(&a.path, false)?;
+        let display = ctx.rel(&abs);
+
+        let modes = [
+            a.find.is_some(),
+            a.lines.is_some(),
+            a.create.unwrap_or(false),
+            a.delete.unwrap_or(false),
+        ];
+        match modes.iter().filter(|m| **m).count() {
+            1 => {}
+            0 => {
+                return Err(WErr::invalid_args(
+                    "no edit mode",
+                    "use find+replace, lines+replace, create+content or delete",
+                ))
+            }
+            _ => {
+                return Err(WErr::invalid_args(
+                    "multiple edit modes",
+                    "use exactly one of find, lines, create, delete",
+                ))
+            }
+        }
+
+        if a.delete.unwrap_or(false) {
+            if !abs.exists() {
+                return Err(WErr::with_hint(
+                    "not_found",
+                    format!("'{display}' does not exist"),
+                    "check the path",
+                ));
+            }
+            if abs.is_dir() {
+                return Err(WErr::with_hint(
+                    "is_directory",
+                    format!("'{display}' is a directory"),
+                    "edit only files",
+                ));
+            }
+            std::fs::remove_file(&abs)
+                .map_err(|e| WErr::new("permission_denied", format!("delete {display}: {e}")))?;
+            ctx.ledger.invalidate_path(&display);
+            let mut r = ToolResult::new("edit", format!("deleted {display}"));
+            r.meta.counts.insert("deleted".into(), 1);
+            return Ok(r);
+        }
+
+        if a.create.unwrap_or(false) {
+            let content = a.content.clone().ok_or_else(|| {
+                WErr::invalid_args("create requires content", "content=<file text>")
+            })?;
+            if abs.exists() && !a.overwrite.unwrap_or(false) {
+                return Err(WErr::with_hint(
+                    "already_exists",
+                    format!("'{display}' already exists"),
+                    "pass overwrite=true to replace it",
+                ));
+            }
+            util::atomic_write(&abs, content.as_bytes())?;
+            ctx.ledger.invalidate_path(&display);
+            let short = hash::short(&hash::hash_str(&content));
+            let mut r = ToolResult::new(
+                "edit",
+                format!("created {display} ({} bytes)", content.len()),
+            );
+            r.meta.counts.insert("created".into(), 1);
+            r.meta.notes.push(format!("hash {short}"));
+            post_check(&mut r, ctx, &abs, &content)?;
+            return Ok(r);
+        }
+
+        let old = std::fs::read_to_string(&abs)
+            .map_err(|e| WErr::new("not_found", format!("read {display}: {e}")))?;
+        let old_hex = hash::hash_bytes(old.as_bytes());
+        let old_short = hash::short(&old_hex);
+        if let Some(expect) = &a.expect_hash {
+            let ok = expect == &old_short
+                || expect == &old_hex
+                || old_hex.starts_with(expect.trim_start_matches("b3:"));
+            if !ok {
+                return Err(WErr::with_hint(
+                    "hash_mismatch",
+                    format!("current={old_short}"),
+                    "re-read the file before editing",
+                ));
+            }
+        }
+
+        let replace = a.replace.clone().unwrap_or_default();
+        let (new, ins, del) = if let Some(find) = &a.find {
+            if find.is_empty() {
+                return Err(WErr::invalid_args(
+                    "find must not be empty",
+                    "pass the exact literal anchor text",
+                ));
+            }
+            if a.replace.is_none() {
+                return Err(WErr::invalid_args(
+                    "find requires replace",
+                    "replace=<new text>",
+                ));
+            }
+            let positions: Vec<usize> = old.match_indices(find.as_str()).map(|(i, _)| i).collect();
+            match positions.len() {
+                0 => {
+                    return Err(WErr::with_hint(
+                        "anchor_not_found",
+                        format!("anchor not found in {display}"),
+                        format!("try: w read path={display} lines=1:80"),
+                    ))
+                }
+                1 => {
+                    let pos = positions[0];
+                    let mut new = String::with_capacity(old.len() + replace.len());
+                    new.push_str(&old[..pos]);
+                    new.push_str(&replace);
+                    new.push_str(&old[pos + find.len()..]);
+                    let ins = replace.lines().count().max(1);
+                    let del = find.lines().count().max(1);
+                    (new, ins, del)
+                }
+                n => {
+                    let locs: Vec<String> = positions
+                        .iter()
+                        .take(5)
+                        .map(|p| {
+                            let line = old[..*p].matches('\n').count() + 1;
+                            let col = p - old[..*p].rfind('\n').map(|i| i + 1).unwrap_or(0) + 1;
+                            format!("{line}:{col}")
+                        })
+                        .collect();
+                    return Err(WErr::with_hint(
+                        "ambiguous_anchor",
+                        format!("{n} matches in {display} at {}", locs.join(", ")),
+                        format!("try: w read path={display} lines=<start>:<end>"),
+                    ));
+                }
+            }
+        } else {
+            let spec = a.lines.as_ref().unwrap();
+            let line_count = old.lines().count();
+            let (start, end) = parse_line_range(spec, line_count)?;
+            let had_trailing = old.ends_with('\n');
+            let mut lines: Vec<&str> = old.split('\n').collect();
+            if had_trailing {
+                lines.pop();
+            }
+            let repl: Vec<&str> = if replace.is_empty() {
+                Vec::new()
+            } else {
+                replace.split('\n').collect()
+            };
+            let ins = repl.len();
+            let del = end - start + 1;
+            let mut out_lines: Vec<&str> = Vec::new();
+            out_lines.extend_from_slice(&lines[..start - 1]);
+            out_lines.extend_from_slice(&repl);
+            out_lines.extend_from_slice(&lines[end..]);
+            let mut new = out_lines.join("\n");
+            if had_trailing || replace.ends_with('\n') {
+                new.push('\n');
+            }
+            (new, ins, del)
+        };
+
+        util::atomic_write(&abs, new.as_bytes())?;
+        ctx.ledger.invalidate_path(&display);
+        let new_hex = hash::hash_bytes(new.as_bytes());
+        let short = hash::short(&new_hex);
+        let mut r = ToolResult::new(
+            "edit",
+            format!("edited {display} (+{ins} -{del}) ({short})"),
+        );
+        r.meta.counts.insert("inserted".into(), ins as i64);
+        r.meta.counts.insert("deleted".into(), del as i64);
+        post_check(&mut r, ctx, &abs, &new)?;
+        Ok(r)
+    }
+}
+
+fn post_check(
+    r: &mut ToolResult,
+    ctx: &mut ToolContext<'_>,
+    abs: &Path,
+    content: &str,
+) -> Result<()> {
+    if !ctx.config.edit.post_check {
+        return Ok(());
+    }
+    let errors = wbash_index::syntax_errors(abs, content);
+    if errors.is_empty() {
+        return Ok(());
+    }
+    r.header
+        .push_str(&format!("; {} syntax errors", errors.len()));
+    r.meta.ok = false;
+    for e in &errors {
+        r.diag(Diagnostic {
+            file: ctx.rel(abs),
+            line: e.line as u32,
+            col: Some(e.col as u32),
+            severity: Severity::Error,
+            code: None,
+            message: e.message.clone(),
+            tool: Some("tree-sitter".to_string()),
+        });
+    }
+    let mut lines = Vec::new();
+    for e in &errors {
+        lines.push(format!(
+            "{}:{}:{} error {}",
+            ctx.rel(abs),
+            e.line,
+            e.col,
+            e.message
+        ));
+    }
+    let h = ctx
+        .handles
+        .put("post_check", lines.join("\n").as_bytes(), "text")?;
+    for line in lines {
+        r.must(line);
+    }
+    r.handle(HandleRef {
+        id: h.id.clone(),
+        kind: h.kind.clone(),
+        bytes: h.bytes,
+        hash: h.hash.clone(),
+    });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// expand
+// ---------------------------------------------------------------------------
+
+pub struct ExpandTool;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExpandArgs {
+    #[serde(rename = "ref")]
+    reference: String,
+    grep: Option<String>,
+    lines: Option<String>,
+    head: Option<u32>,
+    tail: Option<u32>,
+    #[serde(default)]
+    offset: u32,
+}
+
+impl Tool for ExpandTool {
+    fn name(&self) -> &'static str {
+        "expand"
+    }
+    fn description(&self) -> &'static str {
+        "Expand a handle with optional grep/lines/head/tail filters."
+    }
+    fn min_tier(&self) -> Tier {
+        Tier::ReadOnly
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string"},
+                "grep": {"type": "string"},
+                "lines": {"type": "string"},
+                "head": {"type": "integer", "minimum": 1},
+                "tail": {"type": "integer", "minimum": 1},
+                "offset": {"type": "integer", "minimum": 0, "default": 0}
+            },
+            "required": ["ref"],
+            "additionalProperties": false
+        })
+    }
+    fn call(&self, args: &Value, ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
+        let a: ExpandArgs = parse_args(
+            args.clone(),
+            "expand",
+            "pass ref plus optional grep, lines, head, tail, offset",
+        )?;
+        let id = if a.reference.starts_with('~') {
+            a.reference.clone()
+        } else {
+            format!("~{}", a.reference)
+        };
+        let (bytes, rec) = ctx.handles.get(&id)?;
+        if rec.content_type == "bytes" {
+            let mut r = ToolResult::new(
+                "expand",
+                format!(
+                    "{id} binary {} bytes ({})",
+                    rec.bytes,
+                    hash::short(&rec.hash)
+                ),
+            );
+            r.meta.counts.insert("bytes".into(), rec.bytes as i64);
+            return Ok(r);
+        }
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        let all: Vec<&str> = text.lines().collect();
+        let total = all.len();
+        let mut selected: Vec<&str> = all.clone();
+
+        if let Some(pattern) = &a.grep {
+            let re = regex::Regex::new(pattern).map_err(|e| {
+                WErr::invalid_args(
+                    format!("invalid regex '{pattern}': {e}"),
+                    "check escaping or use a simpler pattern",
+                )
+            })?;
+            selected.retain(|l| re.is_match(l));
+        }
+        if let Some(spec) = &a.lines {
+            let (start, end) = parse_line_range(spec, total.max(1))?;
+            let lo = start.saturating_sub(1).min(selected.len());
+            let hi = end.min(selected.len());
+            selected = selected[lo..hi].to_vec();
+        }
+        if let Some(head) = a.head {
+            selected.truncate(head as usize);
+        }
+        if let Some(tail) = a.tail {
+            let skip = selected.len().saturating_sub(tail as usize);
+            selected = selected[skip..].to_vec();
+        }
+        let offset = a.offset as usize;
+        if offset > 0 {
+            if offset >= selected.len() {
+                selected.clear();
+            } else {
+                selected = selected[offset..].to_vec();
+            }
+        }
+
+        let filtered = a.grep.is_some()
+            || a.lines.is_some()
+            || a.head.is_some()
+            || a.tail.is_some()
+            || a.offset > 0;
+        let mut r = ToolResult::new(
+            "expand",
+            if filtered {
+                format!(
+                    "{id} {} of {total} lines ({} bytes, {})",
+                    selected.len(),
+                    rec.bytes,
+                    rec.kind
+                )
+            } else {
+                format!("{id} {total} lines ({} bytes, {})", rec.bytes, rec.kind)
+            },
+        );
+        for line in &selected {
+            r.low(line.to_string());
+        }
+        let consumed = a.offset as usize + selected.len();
+        if consumed < total && filtered {
+            r.must(format!("# more: offset={consumed}"));
+        }
+        r.meta.counts.insert("lines".into(), selected.len() as i64);
+        r.meta.counts.insert("bytes".into(), rec.bytes as i64);
+        Ok(r)
+    }
+}
+
+pub fn register(out: &mut Vec<std::sync::Arc<dyn Tool>>) {
+    out.push(std::sync::Arc::new(TreeTool));
+    out.push(std::sync::Arc::new(ReadTool));
+    out.push(std::sync::Arc::new(EditTool));
+    out.push(std::sync::Arc::new(ExpandTool));
+}
+
+pub fn root_abs(ctx: &ToolContext<'_>, path: &str) -> PathBuf {
+    util::path_buf(ctx.root, path)
+}
+
+pub fn _unused(_: &Workspace) {}

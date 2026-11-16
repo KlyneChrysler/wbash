@@ -1,0 +1,9 @@
+id: locate_readseen
+kind: locate
+prompt: "Find where read ledger record is implemented."
+expect:
+  - "struct ReadSeen"
+bash:
+  - "grep -rn \"struct ReadSeen\" crates || true"
+w:
+  - "w search \"struct ReadSeen\" crates"

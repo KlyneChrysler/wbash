@@ -1,0 +1,20 @@
+id: diff_farewell
+kind: summarize_diff
+prompt: "Summarize the working tree change."
+fixture: "fixtures/git_repo"
+setup:
+  - "git init -q"
+  - "git config user.email bench@example.com"
+  - "git config user.name bench"
+  - "git add ."
+  - "git commit -qm base"
+  - "cp variants/diff1.rs src/lib.rs"
+expect:
+  - "farewell"
+check: "true"
+bash:
+  - "git diff --stat"
+  - "git diff"
+w:
+  - "w git status"
+  - "w git diff"

@@ -1,0 +1,14 @@
+id: type_return_string
+kind: fix_lint_or_type
+prompt: "Repair the compile or lint failure with the smallest change."
+fixture: "fixtures/rust_calc"
+setup:
+  - "cp variants/type_mismatch.rs src/lib.rs"
+check: "cargo test -q"
+bash:
+  - "cargo clippy -q -- -D warnings 2>&1 | tail -25 || cargo check -q 2>&1 | tail -25"
+  - "perl -0pi -e 's/\\Q\"a + b\"\\E/a + b/' src/lib.rs"
+w:
+  - "w --tier execute run -- cargo clippy -q -- -D warnings"
+  - "w read src/lib.rs --budget 700"
+  - "w edit src/lib.rs find=\"\\\"a + b\\\"\" replace=\"a + b\""
