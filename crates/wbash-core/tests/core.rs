@@ -93,3 +93,25 @@ fn core_primitives() {
     let abs = root.canonicalize().unwrap();
     assert!(config::is_trusted(&abs));
 }
+
+
+#[test]
+fn env_allowlist_supports_wildcards_and_denies_secrets() {
+    let mut cfg = wbash_core::config::Config::default();
+    cfg.exec.env_allow = vec!["PATH".into(), "CARGO_*".into(), "NODE_*".into()];
+    let mut extra = std::collections::HashMap::new();
+    extra.insert("CARGO_HOME".into(), "/tmp/cargo".into());
+    extra.insert("NODE_OPTIONS".into(), "--x".into());
+    let env = wbash_core::executor::build_env(&cfg, Some(&extra)).unwrap();
+    assert_eq!(env.get("CARGO_HOME").map(String::as_str), Some("/tmp/cargo"));
+    assert_eq!(env.get("NODE_OPTIONS").map(String::as_str), Some("--x"));
+
+    let mut bad = std::collections::HashMap::new();
+    bad.insert("OTHER".into(), "1".into());
+    assert!(wbash_core::executor::build_env(&cfg, Some(&bad)).is_err());
+
+    cfg.exec.env_allow.push("API_KEY".into());
+    let mut secret = std::collections::HashMap::new();
+    secret.insert("API_KEY".into(), "x".into());
+    assert!(wbash_core::executor::build_env(&cfg, Some(&secret)).is_err());
+}
