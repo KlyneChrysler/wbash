@@ -54,7 +54,7 @@ default_mod!(batch_defaults {
 default_mod!(index_defaults {
     enabled: bool = true,
     languages: Vec<String> = super::default_languages(),
-    max_tree_entries: usize = 20_000,
+    max_tree_entries: usize = 250_000,
     use_trigrams: bool = false,
 });
 

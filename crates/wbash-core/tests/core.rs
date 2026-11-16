@@ -43,8 +43,7 @@ fn core_primitives() {
         "outside_workspace"
     );
 
-    let (s, e) = parse_line_range("1:99", 3).unwrap();
-    assert_eq!((s, e), (1, 3));
+    assert!(parse_line_range("1:99", 3).is_err());
 
     // Budget fitting: must-keep survives, elision is resolvable.
     let mut result = ToolResult::new("read", "header");

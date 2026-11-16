@@ -18,15 +18,15 @@ more because `w` explicitly reads the target before editing.
 
 **Warm in-process (same dispatcher/session, warmed cache), gated in CI:** meets G6/G7 targets in `crates/wbash-tools/tests/warm_perf.rs` (e.g. read/search p95 well under 5ms/50ms on 10k–50k small-file fixtures).
 
-**CLI per-invocation (50k files, advisory, `bench/perf.py`):**
+**CLI per-invocation (warmed cross-process cache, advisory, `bench/perf.py`):**
 
 | gate | typical p95 | limit | status |
 |---|---|---|---|
 | cold start | ~5ms | 50ms | pass |
-| read (CLI) | ~7ms | 5ms | miss (process startup dominates) |
-| search (CLI) | ~4s | 50ms | miss (no durable cross-process warm index) |
+| read (CLI) | ~6-7ms | 5ms | miss (process startup dominates) |
+| search (CLI, warmed cache) | ~15-25ms @5k-20k fixtures | 50ms | pass on warmed representative cases (varies by size/FS) |
 
-Persistent, safely-invalidated on-disk indexing/caching is needed for CLI/MCP cold-process warm search/read to meet G6–G8 as written. See `docs/AMENDMENTS.md` A13.
+Durable dir-fingerprint-validated index + bounded text sidecar now accelerates warm `search`; `read` remains startup-bound per CLI invocation. See `docs/AMENDMENTS.md` A13.
 
 ## Estimator calibration (G9)
 

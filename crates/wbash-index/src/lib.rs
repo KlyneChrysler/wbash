@@ -16,6 +16,7 @@ pub const BUILTIN_IGNORES: &[&str] = &[
     "__pycache__",
     "build",
     ".DS_Store",
+    ".cache",
 ];
 
 pub fn is_builtin_ignored(name: &str) -> bool {
@@ -36,10 +37,29 @@ pub struct WalkResult {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct DiskCache {
+    v: u32,
+    root: String,
+    dirs: Vec<(String, i64)>,
+    files: Vec<DiskFile>,
+    truncated: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct DiskFile {
+    rel: String,
+    size: u64,
+    mtime_ms: i64,
+    #[serde(default)]
+    text: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct Workspace {
     root: PathBuf,
     max_entries: usize,
+    cache_path: Option<PathBuf>,
     mem: Mutex<Option<WalkResult>>,
     content: Mutex<HashMap<String, String>>,
 }
@@ -48,7 +68,8 @@ impl Workspace {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
-            max_entries: 200_000,
+            max_entries: 250_000,
+            cache_path: None,
             mem: Mutex::new(None),
             content: Mutex::new(HashMap::new()),
         }
@@ -59,7 +80,8 @@ impl Workspace {
         self
     }
 
-    pub fn with_cache(self, _path: PathBuf) -> Self {
+    pub fn with_cache(mut self, path: PathBuf) -> Self {
+        self.cache_path = Some(path);
         self
     }
 
@@ -101,7 +123,7 @@ impl Workspace {
                 return w.clone();
             }
         }
-        let w = self.scan();
+        let w = self.load_disk().unwrap_or_else(|| self.scan());
         if let Ok(mut g) = self.mem.lock() {
             *g = Some(w.clone());
         }
@@ -111,7 +133,6 @@ impl Workspace {
     /// Return cached file text if available and current by mtime/size.
     pub fn cached_text(&self, rel: &str, size: u64, mtime_ms: i64) -> Option<String> {
         if let Ok(g) = self.content.lock() {
-            // key includes mtime/size encoded
             let key = format!("{rel}\0{size}\0{mtime_ms}");
             if let Some(t) = g.get(&key) {
                 return Some(t.clone());
@@ -125,7 +146,7 @@ impl Workspace {
             return;
         }
         if let Ok(mut g) = self.content.lock() {
-            if g.len() > 60_000 {
+            if g.len() > 80_000 {
                 g.clear();
             }
             g.insert(format!("{rel}\0{size}\0{mtime_ms}"), text);
@@ -163,32 +184,40 @@ impl Workspace {
             });
 
         let mut files = Vec::new();
+        let mut dirs: Vec<(String, i64)> = Vec::new();
         let mut truncated = false;
         for entry in builder.build().flatten() {
             let ft = match entry.file_type() {
                 Some(ft) => ft,
                 None => continue,
             };
+            if ft.is_dir() {
+                let rel = self.rel(entry.path());
+                if rel != "." && !rel.starts_with(".cache/") && rel != ".cache" {
+                    if let Ok(m) = entry.metadata() {
+                        dirs.push((rel, mtime_ms(&m)));
+                    }
+                }
+                continue;
+            }
             if !ft.is_file() {
                 continue;
             }
             let abs = entry.path().to_path_buf();
             let rel = self.rel(&abs);
+            if rel.starts_with(".cache/") || rel == ".cache" {
+                continue;
+            }
             let meta = match entry.metadata() {
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            let mtime_ms = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
+            let m = mtime_ms(&meta);
             files.push(FileEntry {
                 abs,
                 rel,
                 size: meta.len(),
-                mtime_ms,
+                mtime_ms: m,
             });
             if files.len() >= self.max_entries {
                 truncated = true;
@@ -196,10 +225,133 @@ impl Workspace {
             }
         }
         files.sort_by(|a, b| a.rel.cmp(&b.rel));
-        WalkResult { files, truncated }
+        dirs.sort();
+        dirs.dedup();
+        let w = WalkResult { files, truncated };
+        self.save_disk(&w, &dirs);
+        w
     }
 
-    /// Invalidate in-memory cache (e.g. after writes).
+    fn save_disk(&self, w: &WalkResult, dirs: &[(String, i64)]) {
+        let Some(path) = &self.cache_path else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        // metadata index (fast to parse) + compact content sidecar for warm cross-process reads/search
+        let mut content_blob: Vec<u8> = Vec::new();
+        let mut total = 0usize;
+        let files: Vec<DiskFile> = w
+            .files
+            .iter()
+            .map(|f| {
+                let mut has = false;
+                if total < 48_000_000 {
+                    // read small text files for warm search cache (bounded)
+                    if let Ok(tf) = read_text(&f.abs) {
+                        if !tf.binary && tf.content.len() <= 64_000 {
+                            let b = tf.content.as_bytes();
+                            content_blob.extend_from_slice(&(b.len() as u32).to_le_bytes());
+                            content_blob.extend_from_slice(b);
+                            total += b.len();
+                            if let Ok(mut g) = self.content.lock() {
+                                g.insert(
+                                    format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms),
+                                    tf.content,
+                                );
+                            }
+                            has = true;
+                        }
+                    }
+                }
+                if !has {
+                    content_blob.extend_from_slice(&0u32.to_le_bytes());
+                }
+                DiskFile {
+                    rel: f.rel.clone(),
+                    size: f.size,
+                    mtime_ms: f.mtime_ms,
+                    text: None,
+                }
+            })
+            .collect();
+        let dc = DiskCache {
+            v: 2,
+            root: self.root.to_string_lossy().to_string(),
+            dirs: dirs.to_vec(),
+            files,
+            truncated: w.truncated,
+        };
+        if let Ok(data) = serde_json::to_vec(&dc) {
+            let _ = std::fs::write(path, data);
+            let cpath = path.with_extension("content");
+            let _ = std::fs::write(cpath, content_blob);
+        }
+    }
+
+    fn load_disk(&self) -> Option<WalkResult> {
+        let path = self.cache_path.as_ref()?;
+        let data = std::fs::read(path).ok()?;
+        let dc: DiskCache = serde_json::from_slice(&data).ok()?;
+        if dc.v != 2 || dc.root != self.root.to_string_lossy() {
+            // v1 or mismatched: drop
+            let _ = std::fs::remove_file(path.with_extension("content"));
+            return None;
+        }
+        for (rel, m) in &dc.dirs {
+            if rel == "." {
+                continue;
+            }
+            let p = self.root.join(rel);
+            let meta = std::fs::metadata(&p).ok()?;
+            if !meta.is_dir() || mtime_ms(&meta) != *m {
+                return None;
+            }
+        }
+        let mut files = Vec::with_capacity(dc.files.len());
+        for f in &dc.files {
+            files.push(FileEntry {
+                abs: self.root.join(&f.rel),
+                rel: f.rel.clone(),
+                size: f.size,
+                mtime_ms: f.mtime_ms,
+            });
+        }
+        // load content sidecar best-effort
+        let cpath = path.with_extension("content");
+        if let Ok(blob) = std::fs::read(&cpath) {
+            let mut off = 0usize;
+            if let Ok(mut g) = self.content.lock() {
+                for f in &dc.files {
+                    if off + 4 > blob.len() {
+                        break;
+                    }
+                    let len = u32::from_le_bytes(blob[off..off + 4].try_into().ok()?) as usize;
+                    off += 4;
+                    if len == 0 {
+                        continue;
+                    }
+                    if off + len > blob.len() {
+                        break;
+                    }
+                    if let Ok(s) = std::str::from_utf8(&blob[off..off + len]) {
+                        g.insert(
+                            format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms),
+                            s.to_string(),
+                        );
+                    }
+                    off += len;
+                }
+            }
+        }
+        Some(WalkResult {
+            files,
+            truncated: dc.truncated,
+        })
+    }
+
+    /// Invalidate in-memory and on-disk cache (e.g. after writes).
     pub fn invalidate(&self) {
         if let Ok(mut g) = self.mem.lock() {
             *g = None;
@@ -207,7 +359,19 @@ impl Workspace {
         if let Ok(mut g) = self.content.lock() {
             g.clear();
         }
+        if let Some(p) = &self.cache_path {
+            let _ = std::fs::remove_file(p);
+            let _ = std::fs::remove_file(p.with_extension("content"));
+        }
     }
+}
+
+fn mtime_ms(meta: &std::fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone)]

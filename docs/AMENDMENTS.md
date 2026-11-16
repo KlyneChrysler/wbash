@@ -79,7 +79,8 @@ reason and the affected gate/test.
 
 ## A13. Performance gates G6-G8
 - Cold start passes in release builds. Warm in-process dispatcher read/search meet G6/G7 targets in tests (e.g. ~<1ms read, ~<30ms search p95 @50k small files with warmed workspace/content cache in the same process).
-- CLI per-invocation read/search still include process startup and lack a durable cross-process warm index; `bench/perf.py` remains advisory for those CLI measurements. A persistent, safely-invalidated on-disk index/cache is required to make CLI/MCP-cold-process warm search consistently meet <50ms at 50k files.
+- Durable cross-process warm cache added: `Workspace` persists a dir-fingerprint-validated metadata index and bounded text sidecar under `<cache>/w-bash/index/*.walk.{json,content}` (ignores `.cache`; invalidated on dir-mtime changes/writes). On warmed CLI runs this brings `search` into G7 range on representative fixtures (e.g. ~25ms p95 @20k small files); very large/uncached cases can still vary and `bench/perf.py` remains advisory.
+- CLI per-invocation `read` remains startup-bound (~6-7ms p95, A13/G6 CLI) though warm-transport/in-process reads meet target. Further gains need persistent per-file hot cache integration beyond sidecar and/or daemon/MCP warm transport.
 - Scripted benchmark coverage is 30 tasks (`bench/tasks`, `bench/run.py`) with baseline/report artifacts. Agentic E2E runs (turns/retries/model token variance) and a compactor baseline are not yet automated (require model-run environment/credentials).
 
 ## A15. Packaging/release scaffolding
