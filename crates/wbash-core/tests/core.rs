@@ -94,7 +94,6 @@ fn core_primitives() {
     assert!(config::is_trusted(&abs));
 }
 
-
 #[test]
 fn env_allowlist_supports_wildcards_and_denies_secrets() {
     let mut cfg = wbash_core::config::Config::default();
@@ -103,7 +102,10 @@ fn env_allowlist_supports_wildcards_and_denies_secrets() {
     extra.insert("CARGO_HOME".into(), "/tmp/cargo".into());
     extra.insert("NODE_OPTIONS".into(), "--x".into());
     let env = wbash_core::executor::build_env(&cfg, Some(&extra)).unwrap();
-    assert_eq!(env.get("CARGO_HOME").map(String::as_str), Some("/tmp/cargo"));
+    assert_eq!(
+        env.get("CARGO_HOME").map(String::as_str),
+        Some("/tmp/cargo")
+    );
     assert_eq!(env.get("NODE_OPTIONS").map(String::as_str), Some("--x"));
 
     let mut bad = std::collections::HashMap::new();

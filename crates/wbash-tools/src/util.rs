@@ -286,6 +286,29 @@ fn is_toolchain_frame(line: &str) -> bool {
             || l.contains("<frozen "))
 }
 
+fn template_key(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c.is_ascii_digit() {
+            while matches!(chars.peek(), Some(&d) if d.is_ascii_digit() || d == '.' || d == ':') {
+                chars.next();
+            }
+            out.push_str("<N>");
+        } else if c == '0' && matches!(chars.peek(), Some(&'x' | &'X')) {
+            out.push(c);
+            out.push(chars.next().unwrap());
+            while matches!(chars.peek(), Some(&d) if d.is_ascii_hexdigit()) {
+                chars.next();
+            }
+            out.push_str("<H>");
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 pub fn strip_toolchain_frames(lines: Vec<String>) -> Vec<String> {
     let mut out = Vec::with_capacity(lines.len());
     let mut dropped = 0usize;
@@ -423,7 +446,26 @@ pub fn compact_tail(
             {
                 k += 1;
             }
-            let count = k - j;
+            let mut count = k - j;
+            if count == 1 {
+                let tk = template_key(line);
+                while k < stream.len()
+                    && stream[k].2 == ItemClass::Low
+                    && stream[k].0 == i + (k - j)
+                    && template_key(stream[k].1) == tk
+                {
+                    k += 1;
+                }
+                count = k - j;
+                if count > 2 {
+                    result.low(format!("[template ×{count}] {tk}"));
+                    last_emitted = Some(stream[k - 1].0);
+                    j = k;
+                    continue;
+                }
+                count = 1;
+                k = j + 1;
+            }
             if count > 1 {
                 result.low(line.to_string());
                 result.low(format!("  ×{count} repeated"));
@@ -515,5 +557,24 @@ mod tests {
             "{text}"
         );
         assert_eq!(text.matches("full: ~").count(), 1, "{text}");
+    }
+
+    #[test]
+    fn compact_tail_collapses_template_runs() {
+        let dir = tmp("tpl");
+        let mut hs = HandleStore::open("s", &dir, 3600, 8 << 20, Redactor::new()).unwrap();
+        let mut tr = ToolResult::new("run", "exit 0".to_string());
+        let raw =
+            "start\nretry 1 in 10ms\nretry 2 in 20ms\nretry 3 in 30ms\nretry 4 in 40ms\nend\n";
+        compact_tail(&mut tr, raw, "run", &mut hs, false).unwrap();
+        let text = tr
+            .items
+            .iter()
+            .flat_map(|i| i.lines.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("[template ×4]"), "{text}");
+        assert!(!text.contains("retry 3 in 30ms"), "{text}");
     }
 }

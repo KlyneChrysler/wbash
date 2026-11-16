@@ -134,7 +134,6 @@ fn run_parse_miss_preserves_raw_tail_and_single_full_handle() {
     assert_eq!(full_count, 1, "{}", r.text);
 }
 
-
 #[test]
 fn run_parse_miss_preserves_all_error_markers_in_handle() {
     let root: PathBuf = std::env::temp_dir().join(format!("wbash-diff-rt2-{}", std::process::id()));
@@ -153,7 +152,8 @@ fn run_parse_miss_preserves_all_error_markers_in_handle() {
         Arc::new(ParserRegistry::new()),
     )
     .unwrap();
-    d.set_session_tier("d", wbash_core::types::Tier::Execute).unwrap();
+    d.set_session_tier("d", wbash_core::types::Tier::Execute)
+        .unwrap();
 
     let cmd = "i=1; while [ $i -le 40 ]; do echo noise$i; i=$((i+1)); done; echo 'error: first'; echo '  --> a.rs:1:1'; echo 'error: second'; exit 7";
     let r = d.call("run", &json!({"argv": ["sh", "-c", cmd]}), "d");
