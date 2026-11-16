@@ -187,3 +187,24 @@ fn cargo_injects_before_separator() {
         ]
     );
 }
+
+#[test]
+fn cargo_success_fact_and_warnings_summary() {
+    let reg = registry();
+    let stdout = r#"{"reason":"compiler-message","message":{"level":"warning","message":"unused variable","code":{"code":"unused_variables"},"spans":[{"file_name":"src/lib.rs","line_start":2,"column_start":9,"is_primary":true}]}}
+{"reason":"compiler-artifact","package_id":"demo 0.1.0 (path+file:///tmp/demo)","manifest_path":"/tmp/demo/Cargo.toml","target":{"kind":["lib"],"crate_types":["lib"],"name":"demo","src_path":"/tmp/demo/src/lib.rs","edition":"2021","doc":true,"doctest":true,"test":true},"profile":{"opt_level":"0","debuginfo":2,"debug_assertions":true,"overflow_checks":true,"test":false},"features":[],"filenames":[],"executable":null,"fresh":false}
+{"reason":"build-finished","success":true}
+"#;
+    let run = reg
+        .parse(
+            &["cargo".to_string(), "check".to_string()],
+            &Exit::Code(0),
+            stdout,
+            "",
+        )
+        .unwrap();
+    assert_eq!(run.parser.as_deref(), Some("cargo"));
+    assert_eq!(run.summary.as_deref(), Some("check ok, 1 warnings"));
+    assert_eq!(run.diagnostics.len(), 1);
+    assert_eq!(run.diagnostics[0].severity, Severity::Warn);
+}
