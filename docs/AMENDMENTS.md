@@ -70,25 +70,21 @@ reason and the affected gate/test.
   must-keep-only renders; per-tool maxima still clamp upward requests.
 - Tests: CLI smoke; schema budget test asserts exposed schemas ≤1500 est tokens.
 
-## A12. Deferred gates
-- Fuzz targets exist for args, paths, parsers, and formatter, but CI runs them
-  in smoke mode only; no long-running fuzz corpus is committed yet.
-- Estimator calibration against a pinned tokenizer (G9) is not wired; the
-  deterministic char/line heuristic is used and documented.
-- Benchmark harness (30+ tasks) is not yet implemented; perf smoke thresholds
-  are not gated in CI.
+## A12. Gates/tests status (v0.1 working state)
+- Property-style invariant tests added (`crates/wbash-core/tests/properties.rs`, I1–I7 representative cases) and golden coverage expanded for read/edit/run/check/git/expand/batch/sh/errors (`tests/golden/*`, `crates/wbash-tools/tests/golden.rs`).
+- Fuzz targets exist for args, paths, parsers, and formatter with seed corpora; CI runs smoke fuzz on PR/schedule. Long-running fuzz campaigns and larger corpora are still pending.
+- Estimator calibration (G9) is implemented and gated: `cl100k_base` MAPE 8.36% on `corpus/scrubbed` (`crates/wbash-core/tests/calibration.rs`, `crates/wbash-core/examples/calibrate.rs`, `corpus/expected/estimator.json`).
+- Security/tier/redaction/path-jail checks are exercised in core/tools/adapters tests and a dedicated CI `security` job; broader adversarial matrices remain incremental.
+- CI includes `perf-smoke` warm in-process gating (`crates/wbash-tools/tests/warm_perf.rs`, `bench/warm_gate.py`) and advisory CLI latency reporting (`bench/perf.py`).
 
 ## A13. Performance gates G6-G8
-- Cold start and warm-cache reads pass in release builds; CLI read timing still
-  includes process startup (~5-7ms) and misses the 5ms gate. The gate is met for
-  a warm MCP process, not per-CLI-invocation.
-- `search` has no persistent index: a 50k-file CLI search takes ~4s, far above
-  the 50ms warm-index target. Planned fix: serialized symbol/text index under the
-  cache directory, invalidated by mtime. Until then `bench/perf.py` reports the
-  miss and CI runs it as an advisory artifact.
-- The scripted benchmark (30 tasks) is not an agentic turn/token trial; it
-  isolates tool output cost for a fixed strategy. Agentic E2E and variance over
-  multiple model runs remain future work.
+- Cold start passes in release builds. Warm in-process dispatcher read/search meet G6/G7 targets in tests (e.g. ~<1ms read, ~<30ms search p95 @50k small files with warmed workspace/content cache in the same process).
+- CLI per-invocation read/search still include process startup and lack a durable cross-process warm index; `bench/perf.py` remains advisory for those CLI measurements. A persistent, safely-invalidated on-disk index/cache is required to make CLI/MCP-cold-process warm search consistently meet <50ms at 50k files.
+- Scripted benchmark coverage is 30 tasks (`bench/tasks`, `bench/run.py`) with baseline/report artifacts. Agentic E2E runs (turns/retries/model token variance) and a compactor baseline are not yet automated (require model-run environment/credentials).
+
+## A15. Packaging/release scaffolding
+- Workspace/crate publish metadata added (repository/homepage/readme/authors/descriptions; library crates marked `publish = false` pending API stabilization). CLI crate carries bin targets `w`/`w-bash`.
+- Release automation scaffold added: `.github/workflows/release.yml` (tag-triggered build/package artifacts) and Homebrew formula template `dist/w-bash.rb` (checksums to be filled from release artifacts). Actual `v0.1.0` tag/release and crates.io publish are operational steps not completed in-repo.
 
 ## A14. Benchmark harness scope
 - Tasks are single-line YAML with a minimal parser (no nested YAML). This keeps

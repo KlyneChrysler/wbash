@@ -84,6 +84,20 @@ jobs:
           name: perf-smoke
           path: bench/results/perf.txt
 
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: confinement, tier, redaction, and invariant checks
+        run: |
+          cargo test -p wbash-core --test core --test properties -- --nocapture
+          cargo test -p wbash-tools --test invariants -- --nocapture
+          cargo test -p wbash-adapters --test mcp -- --nocapture
+
+
   fuzz-smoke:
     if: github.event_name == 'pull_request' || github.event_name == 'schedule'
     runs-on: ubuntu-latest

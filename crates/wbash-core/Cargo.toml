@@ -3,6 +3,12 @@ name = "wbash-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Core runtime for w-bash: policy, dispatcher, formatter, handles, estimator"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+authors.workspace = true
+publish = false
 
 [dev-dependencies]
 tiktoken-rs = { workspace = true }

@@ -14,17 +14,19 @@ Token delta (w vs bash): -56.9%. Biggest wins are `explain_*` (outline vs full
 files) and `diff_*` (compact git diff). Fix/rename tasks cost similar or slightly
 more because `w` explicitly reads the target before editing.
 
-## Latency smoke (50k files, cold CLI process)
+## Latency (current)
 
-| gate | median | p95 | limit | status |
-|---|---|---|---|---|
-| cold start | 4.8ms | 5.5ms | 50ms | pass |
-| read (CLI) | 5.9ms | 6.8ms | 5ms | miss (process start included) |
-| search | 3,966ms | 4,093ms | 50ms | miss (no persistent index) |
+**Warm in-process (same dispatcher/session, warmed cache), gated in CI:** meets G6/G7 targets in `crates/wbash-tools/tests/warm_perf.rs` (e.g. read/search p95 well under 5ms/50ms on 10k–50k small-file fixtures).
 
-Read measured in a warm MCP/daemon process is sub-millisecond; the gate assumes
-a warm transport. Search currently walks and reads each file per call. These are
-recorded as A13, not claimed as passing.
+**CLI per-invocation (50k files, advisory, `bench/perf.py`):**
+
+| gate | typical p95 | limit | status |
+|---|---|---|---|
+| cold start | ~5ms | 50ms | pass |
+| read (CLI) | ~7ms | 5ms | miss (process startup dominates) |
+| search (CLI) | ~4s | 50ms | miss (no durable cross-process warm index) |
+
+Persistent, safely-invalidated on-disk indexing/caching is needed for CLI/MCP cold-process warm search/read to meet G6–G8 as written. See `docs/AMENDMENTS.md` A13.
 
 ## Estimator calibration (G9)
 
@@ -34,3 +36,7 @@ MAPE 8.36%, under the 10% gate. Regenerate with:
 ```sh
 cargo run -p wbash-core --example calibrate -- --write-expected
 ```
+
+## Agentic E2E / compactor baseline
+
+Not yet run. Requires a model/agent execution environment and credentials to measure turns, retries, and token variance against a compactor baseline.

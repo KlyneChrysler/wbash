@@ -3,6 +3,11 @@ name = "wbash-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "CLI binaries (w, w-bash) for w-bash"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+authors.workspace = true
 
 [[bin]]
 name = "w"
