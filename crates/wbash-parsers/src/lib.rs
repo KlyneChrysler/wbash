@@ -684,6 +684,12 @@ fn parse_pytest(stdout: &str, stderr: &str) -> Option<ParsedRun> {
     if !saw_fail && summary_line.is_none() {
         return None;
     }
+    if let Some(ref s) = summary_line {
+        if !saw_fail && s.contains("no tests ran") {
+            run.summary = Some("pytest: no tests ran".to_string());
+            return Some(run);
+        }
+    }
     run.summary = summary_line;
     Some(run)
 }

@@ -134,6 +134,7 @@ fn status(ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
     }
     let text = out.stdout_str();
     let mut branch_name = "(detached)".to_string();
+    let mut tracking = String::new();
     let mut entries: Vec<(String, String)> = Vec::new();
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("## ") {
@@ -150,6 +151,11 @@ fn status(ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
                     .unwrap_or(rest)
             };
             branch_name = name.to_string();
+            if let (Some(l), Some(r)) = (rest.find('['), rest.find(']')) {
+                if r > l {
+                    tracking = format!(" {}", &rest[l..=r]);
+                }
+            }
         } else if line.len() > 3 {
             let code = line[..2].trim().to_string();
             let path = line[3..].trim().to_string();
@@ -158,7 +164,7 @@ fn status(ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
     }
     let mut r = ToolResult::new(
         "git",
-        format!("branch {branch_name}, {} changed", entries.len()),
+        format!("branch {branch_name}{tracking}, {} changed", entries.len()),
     );
     for (code, path) in &entries {
         let class = if code.contains('U') || code == "AA" || code == "DD" {
