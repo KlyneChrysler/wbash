@@ -1,1 +1,1 @@
-the w-bash tool is a saving tool baby
+w-bash is a saving tool baby
