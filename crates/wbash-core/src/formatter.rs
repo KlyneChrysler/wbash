@@ -120,6 +120,7 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
         Ok(())
     };
 
+    let mut body_from_items = false;
     for (idx, item) in result.items.iter().enumerate() {
         if included[idx] || item.class == ItemClass::MustKeep {
             emit_dropped(
@@ -134,6 +135,7 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
                 redactions += n;
                 out.push(red);
             }
+            body_from_items = true;
         } else {
             dropped_lines.extend(item.lines.iter().cloned());
         }
@@ -145,6 +147,57 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
         opts.redactor,
         &mut redactions,
     )?;
+
+    // N1: passthrough for small/unstructured outputs when formatting isn't a clear win.
+    if let (Some(raw), Some(pt), Some(min_gain)) = (
+        result.raw_text.as_deref(),
+        opts.passthrough_tokens,
+        opts.min_gain_pct,
+    ) {
+        let raw_t = estimator::estimate_text(raw);
+        let unstructured = result.diagnostics.is_empty()
+            && result.handles.is_empty()
+            && result
+                .meta
+                .counts
+                .keys()
+                .all(|k| matches!(k.as_str(), "raw_bytes" | "duration_ms"));
+        if unstructured && raw_t <= pt {
+            let mut pfx = vec![out[0].clone()];
+            pfx.extend(
+                out.iter()
+                    .skip(1)
+                    .take_while(|l| l.starts_with('#'))
+                    .cloned(),
+            );
+            let (rraw, rn) = opts.redactor.redact(raw.trim_end());
+            redactions += rn;
+            let mut ptext = pfx.join("\n");
+            ptext.push('\n');
+            if !rraw.is_empty() {
+                ptext.push_str(&rraw);
+                ptext.push('\n');
+            }
+            let p_tokens = estimator::estimate_text(&ptext);
+            let cur = estimator::estimate_text(&(out.join("\n") + "\n"));
+            if !body_from_items
+                || p_tokens
+                    <= cur
+                        .saturating_sub(cur.saturating_mul(min_gain) / 100)
+                        .max(p_tokens)
+                || raw_t <= pt / 2 + 1
+            {
+                return Ok(Rendered {
+                    out_tokens: p_tokens,
+                    text: ptext,
+                    ok: result.meta.ok,
+                    cli_code: if result.meta.ok { 0 } else { 1 },
+                    is_error: false,
+                    redactions,
+                });
+            }
+        }
+    }
 
     let mut text = out.join("\n");
     text.push('\n');
