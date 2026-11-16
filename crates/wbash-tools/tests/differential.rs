@@ -161,3 +161,31 @@ fn run_parse_miss_preserves_all_error_markers_in_handle() {
     assert!(r.text.contains("--> a.rs:1:1"), "{}", r.text);
     assert!(r.text.contains("error: second"), "{}", r.text);
 }
+
+#[test]
+fn run_env_allowlist_patterns_apply() {
+    let root: PathBuf = std::env::temp_dir().join(format!("wbash-diff-env-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    copy_fixture(&root);
+    let cache = root.with_extension("cache");
+    let config_home = root.with_extension("config");
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_CACHE_HOME", &cache);
+    std::env::set_var("XDG_CONFIG_HOME", &config_home);
+    let mut d = Dispatcher::new(
+        Config::default(),
+        &root,
+        Arc::new(wbash_tools::registry()),
+        Arc::new(ParserRegistry::new()),
+    )
+    .unwrap();
+    d.set_session_tier("d", wbash_core::types::Tier::Execute)
+        .unwrap();
+    let r = d.call(
+        "run",
+        &json!({"argv": ["sh", "-c", "echo $CARGO_TEST_ENV_X"], "env": {"CARGO_TEST_ENV_X": "ok"}}),
+        "d",
+    );
+    assert!(r.text.contains("ok"), "{}", r.text);
+}
