@@ -469,3 +469,51 @@ pub fn path_buf(root: &Path, rel: &str) -> PathBuf {
         root.join(rel)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use wbash_core::handles::HandleStore;
+    use wbash_core::redact::Redactor;
+
+    fn tmp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wbash-util-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn compact_tail_keeps_error_context_and_dedupes() {
+        let dir = tmp("compact");
+        let mut hs = HandleStore::open("s", &dir, 3600, 8 << 20, Redactor::new()).unwrap();
+        let mut tr = ToolResult::new("run", "exit 1".to_string());
+        let raw = (0..30).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n")
+            + "\nerror[E0425]: cannot find value `x`\n --> src/lib.rs:2:5\n  |\n2 |     x\n  |     ^ not found\n"
+            + &"repeat\n".repeat(5)
+            + "at std::panicking::begin_panic (/rustc/hash/library/std/src/panicking.rs:1:1)\n"
+            + "tail\n";
+        compact_tail(&mut tr, &raw, "run", &mut hs, true).unwrap();
+        let text = tr
+            .items
+            .iter()
+            .flat_map(|i| i.lines.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("error[E0425]"), "{text}");
+        assert!(text.contains("--> src/lib.rs:2:5"), "{text}");
+        assert!(text.contains("^ not found"), "{text}");
+        assert!(text.contains("repeat"), "{text}");
+        assert!(
+            text.contains("×5 repeated") || text.matches("repeat").count() <= 3,
+            "{text}"
+        );
+        assert!(
+            text.contains("...+1 std frames") || !text.contains("rustc/hash"),
+            "{text}"
+        );
+        assert_eq!(text.matches("full: ~").count(), 1, "{text}");
+    }
+}
