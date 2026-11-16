@@ -38,6 +38,7 @@ struct Hit {
     col: u32,
     snippet: String,
     is_definition: bool,
+    score: i32,
 }
 
 impl Tool for SearchTool {
@@ -133,17 +134,23 @@ impl Tool for SearchTool {
                 }
                 let before = hits.len();
                 for s in outline.symbols {
-                    if s.name == a.pattern
-                        || s.name
-                            .to_ascii_lowercase()
-                            .contains(&a.pattern.to_ascii_lowercase())
-                    {
+                    let name_lc = s.name.to_ascii_lowercase();
+                    let pat_lc = a.pattern.to_ascii_lowercase();
+                    if s.name == a.pattern || name_lc.contains(&pat_lc) {
+                        let mut score = 10;
+                        if s.name == a.pattern {
+                            score += 8;
+                        } else if name_lc == pat_lc {
+                            score += 6;
+                        }
+                        score += path_boost(&f.rel, &pat_lc);
                         hits.push(Hit {
                             path: f.rel.clone(),
                             line: s.start_line as u32,
                             col: 1,
                             snippet: format!("{} {}", s.kind, s.line_text),
                             is_definition: true,
+                            score,
                         });
                     }
                 }
@@ -164,12 +171,26 @@ impl Tool for SearchTool {
                         None => line.find(&a.pattern).map(|i| i + 1).unwrap_or(1),
                     };
                     let snippet = line.trim().chars().take(240).collect::<String>();
+                    let is_definition = looks_like_definition(line);
+                    let pat_lc = a.pattern.to_ascii_lowercase();
+                    let mut score = if is_definition { 8 } else { 3 };
+                    if a.mode != "regex" {
+                        let line_lc = line.to_ascii_lowercase();
+                        if line_lc.contains(&format!(" {pat_lc} "))
+                            || line_lc.starts_with(&pat_lc)
+                            || line_lc.ends_with(&pat_lc)
+                        {
+                            score += 2;
+                        }
+                    }
+                    score += path_boost(&f.rel, &pat_lc);
                     hits.push(Hit {
                         path: f.rel.clone(),
                         line: (idx + 1) as u32,
                         col: col as u32,
                         snippet,
-                        is_definition: looks_like_definition(line),
+                        is_definition,
+                        score,
                     });
                 }
             }
@@ -179,8 +200,9 @@ impl Tool for SearchTool {
         }
 
         hits.sort_by(|a, b| {
-            b.is_definition
-                .cmp(&a.is_definition)
+            b.score
+                .cmp(&a.score)
+                .then(b.is_definition.cmp(&a.is_definition))
                 .then(a.path.cmp(&b.path))
                 .then(a.line.cmp(&b.line))
                 .then(a.col.cmp(&b.col))
@@ -316,12 +338,32 @@ fn looks_like_definition(line: &str) -> bool {
         "struct ",
         "enum ",
         "trait ",
+        "impl ",
         "interface ",
         "func ",
         "type ",
+        "const ",
+        "export ",
     ]
     .iter()
     .any(|p| t.starts_with(p) || t.contains(&format!(" {p}")))
+}
+
+fn path_boost(rel: &str, pat_lc: &str) -> i32 {
+    let r = rel.to_ascii_lowercase();
+    let mut b = 0;
+    if let Some(name) = r.rsplit('/').next() {
+        if name.contains(pat_lc) {
+            b += 2;
+        }
+    }
+    if r.contains(pat_lc) {
+        b += 1;
+    }
+    if r.starts_with("src/") {
+        b += 1;
+    }
+    b
 }
 
 pub fn register(out: &mut Vec<std::sync::Arc<dyn Tool>>) {
