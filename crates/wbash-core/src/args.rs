@@ -110,8 +110,12 @@ pub fn parse_line_range(spec: &str, len: usize) -> Result<(usize, usize)> {
             format!("lines='{spec}' is not a valid 1-based inclusive range"),
         ));
     }
-    let start = start.min(len);
-    let end = end.min(len);
+    if start > len || end > len {
+        return Err(WErr::new(
+            "invalid_range",
+            format!("lines='{spec}' exceeds file length {len}"),
+        ));
+    }
     Ok((start, end))
 }
 
