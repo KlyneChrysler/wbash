@@ -48,8 +48,13 @@ impl Dispatcher {
     ) -> Result<Self> {
         let root = policy::canonical_root(root)?;
         let allowlist = config.allowlist_paths();
-        let workspace =
-            Workspace::new(root.clone()).with_max_entries(config.index.max_tree_entries);
+        let walk_cache = paths::cache_dir().join("index").join(format!(
+            "{}.walk.json",
+            &hash::hash_str(&root.to_string_lossy())[..16]
+        ));
+        let workspace = Workspace::new(root.clone())
+            .with_max_entries(config.index.max_tree_entries)
+            .with_cache(walk_cache);
         Ok(Self {
             config,
             root,

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use ignore::WalkBuilder;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub const BUILTIN_IGNORES: &[&str] = &[
     ".git",
@@ -36,10 +36,29 @@ pub struct WalkResult {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CachedWalk {
+    root: String,
+    files: Vec<CachedFile>,
+    truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CachedFile {
+    rel: String,
+    size: u64,
+    mtime_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+}
+
+#[derive(Debug)]
 pub struct Workspace {
     root: PathBuf,
     max_entries: usize,
+    cache_path: Option<PathBuf>,
+    mem: Mutex<Option<WalkResult>>,
+    content: Mutex<HashMap<String, String>>,
 }
 
 impl Workspace {
@@ -47,11 +66,19 @@ impl Workspace {
         Self {
             root: root.into(),
             max_entries: 200_000,
+            cache_path: None,
+            mem: Mutex::new(None),
+            content: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn with_max_entries(mut self, n: usize) -> Self {
         self.max_entries = n;
+        self
+    }
+
+    pub fn with_cache(mut self, path: PathBuf) -> Self {
+        self.cache_path = Some(path);
         self
     }
 
@@ -75,6 +102,72 @@ impl Workspace {
     }
 
     pub fn walk_filtered(&self, filter: Option<&dyn Fn(&str) -> bool>) -> WalkResult {
+        let base = self.walk_cached();
+        if let Some(f) = filter {
+            let files = base.files.into_iter().filter(|e| f(&e.rel)).collect();
+            WalkResult {
+                files,
+                truncated: base.truncated,
+            }
+        } else {
+            base
+        }
+    }
+
+    fn walk_cached(&self) -> WalkResult {
+        if let Ok(g) = self.mem.lock() {
+            if let Some(w) = g.as_ref() {
+                return w.clone();
+            }
+        }
+        let w = self.load_disk_cache().unwrap_or_else(|| self.scan());
+        if let Ok(mut g) = self.mem.lock() {
+            *g = Some(w.clone());
+        }
+        w
+    }
+
+    /// Return cached file text if available and current by mtime/size.
+    pub fn cached_text(&self, rel: &str, size: u64, mtime_ms: i64) -> Option<String> {
+        if let Ok(g) = self.content.lock() {
+            // key includes mtime/size encoded
+            let key = format!("{rel}\0{size}\0{mtime_ms}");
+            if let Some(t) = g.get(&key) {
+                return Some(t.clone());
+            }
+        }
+        None
+    }
+
+    pub fn store_content(&self, rel: &str, size: u64, mtime_ms: i64, text: String) {
+        if text.len() > 512_000 {
+            return;
+        }
+        if let Ok(mut g) = self.content.lock() {
+            if g.len() > 60_000 {
+                g.clear();
+            }
+            g.insert(format!("{rel}\0{size}\0{mtime_ms}"), text);
+        }
+    }
+
+    /// Read text preferring in-memory/disk-backed content cache.
+    pub fn read_cached_text(&self, entry: &FileEntry) -> std::io::Result<TextFile> {
+        if let Some(t) = self.cached_text(&entry.rel, entry.size, entry.mtime_ms) {
+            return Ok(TextFile {
+                content: t,
+                binary: false,
+                size: entry.size,
+            });
+        }
+        let tf = read_text(&entry.abs)?;
+        if !tf.binary {
+            self.store_content(&entry.rel, entry.size, entry.mtime_ms, tf.content.clone());
+        }
+        Ok(tf)
+    }
+
+    fn scan(&self) -> WalkResult {
         let mut builder = WalkBuilder::new(&self.root);
         builder
             .hidden(false)
@@ -100,11 +193,6 @@ impl Workspace {
             }
             let abs = entry.path().to_path_buf();
             let rel = self.rel(&abs);
-            if let Some(f) = filter {
-                if !f(&rel) {
-                    continue;
-                }
-            }
             let meta = match entry.metadata() {
                 Ok(m) => m,
                 Err(_) => continue,
@@ -127,7 +215,118 @@ impl Workspace {
             }
         }
         files.sort_by(|a, b| a.rel.cmp(&b.rel));
-        WalkResult { files, truncated }
+        let w = WalkResult { files, truncated };
+        self.save_disk_cache(&w);
+        w
+    }
+
+    fn load_disk_cache(&self) -> Option<WalkResult> {
+        let path = self.cache_path.as_ref()?;
+        let data = std::fs::read(path).ok()?;
+        let cached: CachedWalk = serde_json::from_slice(&data).ok()?;
+        if cached.root != self.root.to_string_lossy() {
+            return None;
+        }
+        let mut files = Vec::with_capacity(cached.files.len());
+        let mut content = HashMap::new();
+        for f in cached.files {
+            let abs = self.root.join(&f.rel);
+            let meta = std::fs::metadata(&abs).ok()?;
+            let mtime_ms = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            if mtime_ms != f.mtime_ms || meta.len() != f.size {
+                return None;
+            }
+            if let Some(t) = &f.text {
+                content.insert(format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms), t.clone());
+            }
+            files.push(FileEntry {
+                abs,
+                rel: f.rel,
+                size: f.size,
+                mtime_ms: f.mtime_ms,
+            });
+        }
+        if let Ok(mut g) = self.content.lock() {
+            *g = content;
+        }
+        Some(WalkResult {
+            files,
+            truncated: cached.truncated,
+        })
+    }
+
+    fn save_disk_cache(&self, w: &WalkResult) {
+        let Some(path) = self.cache_path.as_ref() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        // include text for small non-binary files (warm search/index cache)
+        let mut total = 0usize;
+        let content = self
+            .content
+            .lock()
+            .ok()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        let cached = CachedWalk {
+            root: self.root.to_string_lossy().to_string(),
+            files: w
+                .files
+                .iter()
+                .map(|f| {
+                    let key = format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms);
+                    let text = content.get(&key).cloned().or_else(|| {
+                        if f.size <= 64_000 && total < 32_000_000 {
+                            if let Ok(tf) = read_text(&f.abs) {
+                                if !tf.binary && tf.content.len() <= 64_000 {
+                                    total += tf.content.len();
+                                    return Some(tf.content);
+                                }
+                            }
+                        }
+                        None
+                    });
+                    CachedFile {
+                        rel: f.rel.clone(),
+                        size: f.size,
+                        mtime_ms: f.mtime_ms,
+                        text,
+                    }
+                })
+                .collect(),
+            truncated: w.truncated,
+        };
+        if let Ok(data) = serde_json::to_vec(&cached) {
+            let _ = std::fs::write(path, data);
+        }
+        // populate in-mem content from what we just built
+        if let Ok(mut g) = self.content.lock() {
+            for f in &cached.files {
+                if let Some(t) = &f.text {
+                    g.insert(format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms), t.clone());
+                }
+            }
+        }
+    }
+
+    /// Invalidate in-memory and disk walk cache (e.g. after writes).
+    pub fn invalidate(&self) {
+        if let Ok(mut g) = self.mem.lock() {
+            *g = None;
+        }
+        if let Ok(mut g) = self.content.lock() {
+            g.clear();
+        }
+        if let Some(p) = &self.cache_path {
+            let _ = std::fs::remove_file(p);
+        }
     }
 }
 

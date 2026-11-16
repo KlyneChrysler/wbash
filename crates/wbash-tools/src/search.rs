@@ -117,7 +117,7 @@ impl Tool for SearchTool {
         }));
         for f in &walk.files {
             scanned_files += 1;
-            let Ok(text) = wbash_index::read_text(&f.abs) else {
+            let Ok(text) = ctx.workspace.read_cached_text(f) else {
                 continue;
             };
             if text.binary {
@@ -208,30 +208,57 @@ impl Tool for SearchTool {
             result.note("search_truncated");
         }
 
-        let mut current_path = String::new();
         let mut context_lines: Vec<String> = Vec::new();
-        for hit in &hits {
-            if hit.path != current_path {
-                current_path = hit.path.clone();
-                context_lines.clear();
-            }
+        // Group consecutive hits in same file with identical snippet as path:l1,l2
+        let mut i = 0usize;
+        while i < hits.len() {
+            let hit = &hits[i];
             let class = if hit.is_definition {
                 ItemClass::High
             } else {
                 ItemClass::Low
             };
+            let mut lines = vec![hit.line];
+            let mut j = i + 1;
+            while j < hits.len()
+                && hits[j].path == hit.path
+                && hits[j].snippet == hit.snippet
+                && hits[j].is_definition == hit.is_definition
+            {
+                if let Some(last) = lines.last().copied() {
+                    if hits[j].line <= last + 1 + a.context { /* keep separate for context clarity */
+                    }
+                }
+                // fold only identical adjacent snippet records with no gaps requested
+                if a.context == 0 {
+                    lines.push(hits[j].line);
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            let loc = if lines.len() == 1 {
+                format!("{}:{}", hit.path, lines[0])
+            } else {
+                let joined = lines
+                    .iter()
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("{}:{}", hit.path, joined)
+            };
             result.push(Item::new(
                 class,
                 if hit.is_definition { 8.0 } else { 3.0 },
-                vec![format!("{}:{}: {}", hit.path, hit.line, hit.snippet)],
+                vec![format!("{}: {}", loc, hit.snippet)],
             ));
             if a.context > 0 {
                 if let Ok(t) = wbash_index::read_text(&ctx.root.join(&hit.path)) {
                     let all: Vec<&str> = t.content.lines().collect();
                     let lo = (hit.line as usize).saturating_sub(a.context as usize + 1);
                     let hi = ((hit.line as usize) + a.context as usize).min(all.len());
-                    for (i, l) in all.iter().enumerate().take(hi).skip(lo) {
-                        let n = i + 1;
+                    for (k, l) in all.iter().enumerate().take(hi).skip(lo) {
+                        let n = k + 1;
                         if n as u32 == hit.line {
                             continue;
                         }
@@ -239,6 +266,7 @@ impl Tool for SearchTool {
                     }
                 }
             }
+            i = j;
         }
         for line in context_lines {
             result.low(line);

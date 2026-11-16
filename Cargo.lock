@@ -613,6 +613,7 @@ version = "0.1.0"
 dependencies = [
  "ignore",
  "serde",
+ "serde_json",
  "tree-sitter",
  "tree-sitter-go",
  "tree-sitter-python",
