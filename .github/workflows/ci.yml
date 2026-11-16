@@ -66,16 +66,20 @@ jobs:
 
   perf-smoke:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p wbash-cli
       - run: mkdir -p bench/results
-      - name: latency gates G6-G8 (advisory)
+      - name: latency smoke (CLI advisory)
         run: python3 bench/perf.py --w-bin target/release/w | tee bench/results/perf.txt
+      - name: warm in-process gates G6-G8
+        env:
+          WBASH_PERF_FILES: "10000"
+        run: python3 bench/warm_gate.py
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: perf-smoke
           path: bench/results/perf.txt
