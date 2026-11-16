@@ -644,4 +644,35 @@ mod tests {
             .join("\n");
         assert!(text.contains("error: boom"), "{text}");
     }
+
+    #[test]
+    fn compact_tail_never_drops_many_scattered_errors() {
+        let dir = tmp("nodrop2");
+        let mut hs = HandleStore::open("s", &dir, 3600, 8 << 20, Redactor::new()).unwrap();
+        let mut tr = ToolResult::new("run", "exit 1".to_string());
+        let mut raw = String::new();
+        for i in 0..120 {
+            if i % 17 == 0 {
+                raw.push_str(&format!("error: e{i}\n"));
+            } else {
+                raw.push_str(&format!("line {i}\n"));
+            }
+        }
+        compact_tail(&mut tr, &raw, "run", &mut hs, true).unwrap();
+        let text = tr
+            .items
+            .iter()
+            .flat_map(|i| i.lines.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        for i in 0..120 {
+            if i % 17 == 0 {
+                assert!(
+                    text.contains(&format!("error: e{i}")),
+                    "missing e{i} in {text}"
+                );
+            }
+        }
+    }
 }
