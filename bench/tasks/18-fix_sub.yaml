@@ -10,5 +10,4 @@ bash:
   - "perl -0pi -e \"s/\\Qpub fn sub(a: i32, b: i32) -> i32 {\n    a + b\\E/pub fn sub(a: i32, b: i32) -> i32 {\n    a - b/\" src/lib.rs"
 w:
   - "w --tier execute run -- cargo test -q"
-  - "w read src/lib.rs --budget 700"
   - "w edit src/lib.rs find=\"pub fn sub(a: i32, b: i32) -> i32 {\n    a + b\" replace=\"pub fn sub(a: i32, b: i32) -> i32 {\n    a - b\""

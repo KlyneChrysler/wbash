@@ -10,5 +10,4 @@ bash:
   - "perl -0pi -e \"s/\\Qlet unused = 1;\\E/let _unused = 1;/\" src/lib.rs"
 w:
   - "w --tier execute run -- cargo clippy -q -- -D warnings"
-  - "w read src/lib.rs --budget 700"
   - "w edit src/lib.rs find=\"let unused = 1;\" replace=\"let _unused = 1;\""

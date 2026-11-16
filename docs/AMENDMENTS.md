@@ -114,3 +114,8 @@ reason and the affected gate/test.
 ## A19. Env/toolchain fidelity
 - Child env allowlist (with wildcard/prefix patterns) preserves semantics-relevant toolchain variables (incl. `CARGO_*`/`CARGO_TARGET_DIR`, Rust/Go/Python/Node/Java/Maven/Gradle/etc. families as configured) subject to secret-key denial.
 - Tests: `run_env_allowlist_patterns_apply`, `run_env_honors_cargo_target_dir`.
+
+
+## A20. Multi-path search
+- `search` accepts multiple scope paths (`paths`/multiple positional CLI paths) so a single query can span several roots (e.g. `w search old_name src tests`) without missing matches outside the first path.
+- Tests: CLI/task coverage in scripted bench rename flows.

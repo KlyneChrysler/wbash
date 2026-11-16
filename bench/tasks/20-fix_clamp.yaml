@@ -10,5 +10,4 @@ bash:
   - "perl -0pi -e \"s/\\Q    let _ = (lo, hi);\n    v\\E/    if v < lo {\n        lo\n    } else if v > hi {\n        hi\n    } else {\n        v\n    }/\" src/lib.rs"
 w:
   - "w --tier execute run -- cargo test -q"
-  - "w read src/lib.rs --budget 700"
   - "w edit src/lib.rs find=\"let _ = (lo, hi);\n    v\" replace=\"if v < lo {\n        lo\n    } else if v > hi {\n        hi\n    } else {\n        v\n    }\""

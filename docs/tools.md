@@ -25,8 +25,8 @@ JSON schemas are generated from the same argument structs and exposed over MCP
 - `read`: `path`, optional `lines="A:B"` (1-based, clamped), `symbol`,
   `outline=false`, `expect_hash`. Large files emit an outline plus head and an
   elision handle for the remainder.
-- `search`: `pattern`, `mode="text"|"regex"`, `path="."`, `glob`, `context=0`,
-  `limit`.
+- `search`: `pattern`, `mode="text"|"regex"|"symbol"`, `path="."` (or multiple paths), `paths`, `glob`, `context=0`,
+  `limit`. Returns ranked matches; CLI accepts multiple positional paths (e.g. `w search pat src tests`).
 - `expand`: `ref="~id"`, `grep`, `lines`, `head`, `tail`, `offset=0`.
 - `edit`: `path` plus exactly one operation: `find`+`replace` (unique literal
   match), `lines`+`content` (splice), `create=true`+`content`, `overwrite=true`

@@ -18,6 +18,8 @@ struct SearchArgs {
     mode: String,
     #[serde(default = "dot")]
     path: String,
+    #[serde(default)]
+    paths: Vec<String>,
     glob: Option<String>,
     #[serde(default)]
     context: u32,
@@ -58,6 +60,7 @@ impl Tool for SearchTool {
                 "pattern": {"type": "string"},
                 "mode": {"type": "string", "enum": ["text", "regex", "symbol"], "default": "text"},
                 "path": {"type": "string", "default": "."},
+                "paths": {"type": "array", "items": {"type": "string"}},
                 "glob": {"type": "string"},
                 "context": {"type": "integer", "minimum": 0, "maximum": 20, "default": 0},
                 "limit": {"type": "integer", "minimum": 1}
@@ -94,8 +97,16 @@ impl Tool for SearchTool {
                 format!("limit must be 1..={}", ctx.config.search.max_limit),
             ));
         }
-        let base = ctx.resolve(&a.path, true)?;
-        let base_rel = ctx.rel(&base);
+        let mut bases_rel = Vec::new();
+        if a.paths.is_empty() {
+            let base = ctx.resolve(&a.path, true)?;
+            bases_rel.push(ctx.rel(&base));
+        } else {
+            for p in &a.paths {
+                let base = ctx.resolve(p, true)?;
+                bases_rel.push(ctx.rel(&base));
+            }
+        }
         let gs = util::globset(a.glob.as_deref())?;
         let regex = if a.mode == "regex" {
             Some(regex::Regex::new(&a.pattern).map_err(|e| {
@@ -114,8 +125,9 @@ impl Tool for SearchTool {
         let mut scanned_files = 0usize;
 
         let walk = ctx.workspace.walk_cached_arc();
-        let filter =
-            |rel: &str| util::under(rel, &base_rel) && util::matches_glob(gs.as_ref(), rel);
+        let filter = |rel: &str| {
+            bases_rel.iter().any(|b| util::under(rel, b)) && util::matches_glob(gs.as_ref(), rel)
+        };
         for f in walk.files.iter() {
             if !filter(&f.rel) {
                 continue;

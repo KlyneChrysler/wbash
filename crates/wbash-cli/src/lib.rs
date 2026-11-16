@@ -131,6 +131,20 @@ fn run_inner(argv: Vec<String>) -> Result<i32> {
         }
     } else if tool == "git" {
         build_git_args(&mut obj, &positionals)?;
+    } else if tool == "search" {
+        if !positionals.is_empty() {
+            obj.insert("pattern".into(), Value::String(positionals[0].clone()));
+        }
+        if positionals.len() == 2 {
+            obj.insert("path".into(), Value::String(positionals[1].clone()));
+        } else if positionals.len() > 2 {
+            let paths: Vec<Value> = positionals[1..]
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect();
+            obj.insert("paths".into(), Value::Array(paths));
+        }
     } else {
         fill_positionals(&tool, &mut obj, &positionals)?;
     }
