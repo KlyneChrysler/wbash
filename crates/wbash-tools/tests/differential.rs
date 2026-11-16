@@ -189,3 +189,36 @@ fn run_env_allowlist_patterns_apply() {
     );
     assert!(r.text.contains("ok"), "{}", r.text);
 }
+
+#[test]
+fn run_failure_never_drops_any_error_marker_lines() {
+    let root: PathBuf = std::env::temp_dir().join(format!("wbash-diff-rt3-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    copy_fixture(&root);
+    let cache = root.with_extension("cache");
+    let config_home = root.with_extension("config");
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_CACHE_HOME", &cache);
+    std::env::set_var("XDG_CONFIG_HOME", &config_home);
+    let mut d = Dispatcher::new(
+        Config::default(),
+        &root,
+        Arc::new(wbash_tools::registry()),
+        Arc::new(ParserRegistry::new()),
+    )
+    .unwrap();
+    d.set_session_tier("d", wbash_core::types::Tier::Execute)
+        .unwrap();
+
+    let cmd = "i=1; while [ $i -le 30 ]; do echo noise$i; i=$((i+1)); done; \
+      echo 'error: alpha'; echo '  --> a.rs:1:1'; \
+      i=1; while [ $i -le 30 ]; do echo mid$i; i=$((i+1)); done; \
+      echo 'error: beta'; echo '  --> b.rs:2:2'; \
+      i=1; while [ $i -le 30 ]; do echo tail$i; i=$((i+1)); done; exit 9";
+    let r = d.call("run", &json!({"argv": ["sh", "-c", cmd]}), "d");
+    assert!(r.text.contains("error: alpha"), "{}", r.text);
+    assert!(r.text.contains("--> a.rs:1:1"), "{}", r.text);
+    assert!(r.text.contains("error: beta"), "{}", r.text);
+    assert!(r.text.contains("--> b.rs:2:2"), "{}", r.text);
+}

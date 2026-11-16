@@ -189,7 +189,7 @@ impl ParserSet for ParserRegistry {
     fn parse(&self, argv: &[String], exit: &Exit, stdout: &str, stderr: &str) -> Option<ParsedRun> {
         for entry in self.matching(argv) {
             let parsed = match &entry.kind {
-                Kind::Cargo => parse_cargo(exit, stdout),
+                Kind::Cargo => parse_cargo(argv, exit, stdout),
                 Kind::Pytest => parse_pytest(stdout, stderr),
                 Kind::Jest => parse_jest(stdout),
                 Kind::Vitest => parse_vitest(stdout),
@@ -266,7 +266,7 @@ fn matches_entry(entry: &ParserEntry, argv: &[String]) -> bool {
 // Native parsers
 // ---------------------------------------------------------------------------
 
-fn parse_cargo(exit: &Exit, stdout: &str) -> Option<ParsedRun> {
+fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> {
     let mut run = ParsedRun::default();
     let mut saw_json = false;
     let mut passed = 0;
@@ -437,7 +437,7 @@ fn parse_cargo(exit: &Exit, stdout: &str) -> Option<ParsedRun> {
         .filter(|d| d.severity == Severity::Warn)
         .count();
     let mut parts = Vec::new();
-    if !run.tests.is_empty() || failed > 0 {
+    if !run.tests.is_empty() || failed > 0 || passed > 0 || ignored > 0 {
         if passed > 0 {
             parts.push(format!("{passed} passed"));
         }
@@ -447,15 +447,17 @@ fn parse_cargo(exit: &Exit, stdout: &str) -> Option<ParsedRun> {
         if ignored > 0 {
             parts.push(format!("{ignored} skipped"));
         }
+    } else if exit.is_success() {
+        let sub = cargo_sub(argv).unwrap_or_else(|| "cargo".to_string());
+        parts.push(format!("{sub} ok"));
+    } else if errors == 0 {
+        parts.push("failed".to_string());
     }
     if errors > 0 {
         parts.push(format!("{errors} errors"));
     }
     if warnings > 0 {
         parts.push(format!("{warnings} warnings"));
-    }
-    if parts.is_empty() && exit.is_success() {
-        parts.push("ok".to_string());
     }
     if !parts.is_empty() {
         run.summary = Some(parts.join(", "));
