@@ -114,6 +114,14 @@ impl Tool for CheckTool {
             if let Some(p) = run.parsed {
                 all_ok &= p.diagnostics.iter().all(|d| d.severity != Severity::Error)
                     && !p.tests.iter().any(|t| t.status.is_failure());
+                if let Some(summary) = &p.summary {
+                    if run.output.exit.is_success() {
+                        result.note(format!("{label}: {summary}"));
+                    }
+                } else if run.output.exit.is_success() && diagnostics.is_empty() && tests.is_empty()
+                {
+                    result.note(format!("{label}: ok"));
+                }
                 diagnostics.extend(p.diagnostics);
                 tests.extend(p.tests);
             } else if !run.output.stdout.is_empty() || !run.output.stderr.is_empty() {
@@ -124,6 +132,8 @@ impl Tool for CheckTool {
                     result.note(format!("{label} parse_fallback"));
                 }
                 util::compact_tail(&mut result, &raw, "check", ctx.handles, true)?;
+            } else if run.output.exit.is_success() {
+                result.note(format!("{label}: ok"));
             }
             if run.output.truncated {
                 result.note(format!("{label} output_truncated"));
