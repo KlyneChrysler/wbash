@@ -448,6 +448,7 @@ pub fn compact_tail(
             selected.push((i, l.as_str()));
         }
     }
+    let mut skip_warning_until: usize = 0;
     for (i, l) in lines.iter().enumerate() {
         if !has_errors && i < head_n {
             continue;
@@ -456,15 +457,62 @@ pub fn compact_tail(
             selected.push((i, l.as_str()));
             continue;
         }
+        if has_errors && i < skip_warning_until {
+            continue;
+        }
+        if has_errors && is_warning_line(l) && !is_compact_signal_line(l) {
+            // skip warning diagnostic block (message + context/caret/help tied to it)
+            let mut k = i + 1;
+            while k < lines.len() {
+                let lk = lines[k].as_str();
+                if is_compact_signal_line(lk) || is_warning_line(lk) {
+                    break;
+                }
+                let t = lk.trim_start();
+                let ctx = t.starts_with("-->")
+                    || t.starts_with('|')
+                    || t.starts_with('[')
+                    || t.starts_with("= help:")
+                    || t.starts_with("= note:")
+                    || t.starts_with("help:")
+                    || t.starts_with("note:")
+                    || (lk.starts_with(' ')
+                        && (t.contains('^')
+                            || t.starts_with('~')
+                            || !t.is_empty()
+                                && t.chars().all(|c| {
+                                    c == ' ' || c == '^' || c == '~' || c == '-' || c == '|'
+                                })))
+                    || lk.trim().is_empty();
+                if !ctx {
+                    break;
+                }
+                k += 1;
+            }
+            skip_warning_until = k;
+            continue;
+        }
         if is_compact_signal_line(l) {
             let start = i.saturating_sub(1);
             let end = (i + 8).min(lines.len());
             for (j, lj) in lines.iter().enumerate().take(end).skip(start) {
                 let lj_s = lj.as_str();
-                if has_errors && is_warning_line(lj_s) && !is_compact_signal_line(lj_s) {
+                if has_errors
+                    && (is_warning_line(lj_s) || (j >= skip_warning_until && j < i/*no*/))
+                    && !is_compact_signal_line(lj_s)
+                {
                     continue;
                 }
+                if has_errors && j > i {
+                    // don't pull in warning blocks that start after signal? rare, but guard
+                    if is_warning_line(lj_s) {
+                        break;
+                    }
+                }
                 if j < i && !(is_error_context_line(lj_s) || is_compact_signal_line(lj_s)) {
+                    continue;
+                }
+                if j < i && has_errors && is_warning_line(lj_s) {
                     continue;
                 }
                 selected.push((j, lj_s));
