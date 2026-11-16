@@ -368,13 +368,13 @@ pub fn compact_tail(
         }
         if is_error_line(l) {
             let end = (i + 5).min(lines.len());
-            for j in i..end {
-                selected.push((j, lines[j].as_str()));
+            for (j, lj) in lines.iter().enumerate().take(end).skip(i) {
+                selected.push((j, lj.as_str()));
                 // keep contiguous context/help block a bit longer if relevant
                 if j > i
-                    && !is_error_line(lines[j].as_str())
-                    && !is_error_context_line(lines[j].as_str())
-                    && lines[j].trim().is_empty()
+                    && !is_error_line(lj.as_str())
+                    && !is_error_context_line(lj.as_str())
+                    && lj.trim().is_empty()
                 {
                     break;
                 }

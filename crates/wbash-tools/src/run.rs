@@ -178,19 +178,17 @@ pub fn record_output(
     }
 
     if let Some(id) = full_ref {
-        if !output.exit.is_success()
-            || result
+        let noisy = result
+            .items
+            .iter()
+            .any(|i| i.class == wbash_core::types::ItemClass::Low && i.lines.len() > 40);
+        if (!output.exit.is_success() || noisy)
+            && !result
                 .items
                 .iter()
-                .any(|i| i.class == wbash_core::types::ItemClass::Low && i.lines.len() > 40)
+                .any(|i| i.lines.iter().any(|l| l == &format!("full: {id}")))
         {
-            if !result
-                .items
-                .iter()
-                .any(|i| i.lines.iter().any(|l| l.contains(&id.to_string())))
-            {
-                result.must(format!("full: {id}"));
-            }
+            result.must(format!("full: {id}"));
         }
     }
     Ok(())
