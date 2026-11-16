@@ -3,14 +3,19 @@ use std::path::PathBuf;
 use serde_json::json;
 use wbash_adapters::McpServer;
 
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn mcp_handshake_list_and_call() {
     let root: PathBuf = std::env::temp_dir().join(format!("wbash-mcp-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("a.txt"), "alpha\nbeta\n").unwrap();
-    std::env::set_var("XDG_CACHE_HOME", root.with_extension("cache"));
-    std::env::set_var("XDG_CONFIG_HOME", root.with_extension("config"));
+    let cache = root.with_extension("cache");
+    let config_home = root.with_extension("config");
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_CACHE_HOME", &cache);
+    std::env::set_var("XDG_CONFIG_HOME", &config_home);
 
     let mut server = McpServer::open(&root, None, true).unwrap();
 

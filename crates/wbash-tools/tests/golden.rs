@@ -6,6 +6,8 @@ use wbash_core::config::Config;
 use wbash_core::dispatcher::Dispatcher;
 use wbash_parsers::ParserRegistry;
 
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn copy_fixture(dst: &Path) {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/repos/basic");
     for rel in [
@@ -33,8 +35,11 @@ fn golden_wire_outputs() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     copy_fixture(&root);
-    std::env::set_var("XDG_CACHE_HOME", root.with_extension("cache"));
-    std::env::set_var("XDG_CONFIG_HOME", root.with_extension("config"));
+    let cache = root.with_extension("cache");
+    let config_home = root.with_extension("config");
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_CACHE_HOME", &cache);
+    std::env::set_var("XDG_CONFIG_HOME", &config_home);
     let mut d = Dispatcher::new(
         Config::default(),
         &root,

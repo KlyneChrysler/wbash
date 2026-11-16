@@ -9,6 +9,8 @@ use wbash_core::formatter::Rendered;
 use wbash_core::types::Tier;
 use wbash_parsers::ParserRegistry;
 
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn setup() -> (PathBuf, Dispatcher) {
     let root = std::env::temp_dir().join(format!("wbash-tools-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -41,8 +43,10 @@ fn setup() -> (PathBuf, Dispatcher) {
 
     let cache = root.with_extension("cache");
     let _ = std::fs::remove_dir_all(&cache);
+    let config_home = root.with_extension("config");
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("XDG_CACHE_HOME", &cache);
-    std::env::set_var("XDG_CONFIG_HOME", root.with_extension("config"));
+    std::env::set_var("XDG_CONFIG_HOME", &config_home);
     let cfg = Config::default();
     let registry = Arc::new(wbash_tools::registry());
     let parsers = Arc::new(ParserRegistry::new());

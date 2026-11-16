@@ -9,6 +9,8 @@ use wbash_core::policy;
 use wbash_core::redact::Redactor;
 use wbash_core::types::{Format, ToolResult};
 
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("wbash-test-{}-{}", name, std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -19,6 +21,7 @@ fn temp_dir(name: &str) -> PathBuf {
 #[test]
 fn core_primitives() {
     let cache = temp_dir("cache");
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("XDG_CACHE_HOME", cache.join("cache-home"));
     std::env::set_var("XDG_CONFIG_HOME", cache.join("config-home"));
 

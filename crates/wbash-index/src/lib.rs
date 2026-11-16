@@ -1,9 +1,9 @@
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use ignore::WalkBuilder;
-use serde::{Deserialize, Serialize};
 
 pub const BUILTIN_IGNORES: &[&str] = &[
     ".git",
@@ -36,27 +36,10 @@ pub struct WalkResult {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CachedWalk {
-    root: String,
-    files: Vec<CachedFile>,
-    truncated: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CachedFile {
-    rel: String,
-    size: u64,
-    mtime_ms: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    text: Option<String>,
-}
-
 #[derive(Debug)]
 pub struct Workspace {
     root: PathBuf,
     max_entries: usize,
-    cache_path: Option<PathBuf>,
     mem: Mutex<Option<WalkResult>>,
     content: Mutex<HashMap<String, String>>,
 }
@@ -66,7 +49,6 @@ impl Workspace {
         Self {
             root: root.into(),
             max_entries: 200_000,
-            cache_path: None,
             mem: Mutex::new(None),
             content: Mutex::new(HashMap::new()),
         }
@@ -77,8 +59,7 @@ impl Workspace {
         self
     }
 
-    pub fn with_cache(mut self, path: PathBuf) -> Self {
-        self.cache_path = Some(path);
+    pub fn with_cache(self, _path: PathBuf) -> Self {
         self
     }
 
@@ -120,7 +101,7 @@ impl Workspace {
                 return w.clone();
             }
         }
-        let w = self.load_disk_cache().unwrap_or_else(|| self.scan());
+        let w = self.scan();
         if let Ok(mut g) = self.mem.lock() {
             *g = Some(w.clone());
         }
@@ -215,117 +196,16 @@ impl Workspace {
             }
         }
         files.sort_by(|a, b| a.rel.cmp(&b.rel));
-        let w = WalkResult { files, truncated };
-        self.save_disk_cache(&w);
-        w
+        WalkResult { files, truncated }
     }
 
-    fn load_disk_cache(&self) -> Option<WalkResult> {
-        let path = self.cache_path.as_ref()?;
-        let data = std::fs::read(path).ok()?;
-        let cached: CachedWalk = serde_json::from_slice(&data).ok()?;
-        if cached.root != self.root.to_string_lossy() {
-            return None;
-        }
-        let mut files = Vec::with_capacity(cached.files.len());
-        let mut content = HashMap::new();
-        for f in cached.files {
-            let abs = self.root.join(&f.rel);
-            let meta = std::fs::metadata(&abs).ok()?;
-            let mtime_ms = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
-            if mtime_ms != f.mtime_ms || meta.len() != f.size {
-                return None;
-            }
-            if let Some(t) = &f.text {
-                content.insert(format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms), t.clone());
-            }
-            files.push(FileEntry {
-                abs,
-                rel: f.rel,
-                size: f.size,
-                mtime_ms: f.mtime_ms,
-            });
-        }
-        if let Ok(mut g) = self.content.lock() {
-            *g = content;
-        }
-        Some(WalkResult {
-            files,
-            truncated: cached.truncated,
-        })
-    }
-
-    fn save_disk_cache(&self, w: &WalkResult) {
-        let Some(path) = self.cache_path.as_ref() else {
-            return;
-        };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        // include text for small non-binary files (warm search/index cache)
-        let mut total = 0usize;
-        let content = self
-            .content
-            .lock()
-            .ok()
-            .map(|g| g.clone())
-            .unwrap_or_default();
-        let cached = CachedWalk {
-            root: self.root.to_string_lossy().to_string(),
-            files: w
-                .files
-                .iter()
-                .map(|f| {
-                    let key = format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms);
-                    let text = content.get(&key).cloned().or_else(|| {
-                        if f.size <= 64_000 && total < 32_000_000 {
-                            if let Ok(tf) = read_text(&f.abs) {
-                                if !tf.binary && tf.content.len() <= 64_000 {
-                                    total += tf.content.len();
-                                    return Some(tf.content);
-                                }
-                            }
-                        }
-                        None
-                    });
-                    CachedFile {
-                        rel: f.rel.clone(),
-                        size: f.size,
-                        mtime_ms: f.mtime_ms,
-                        text,
-                    }
-                })
-                .collect(),
-            truncated: w.truncated,
-        };
-        if let Ok(data) = serde_json::to_vec(&cached) {
-            let _ = std::fs::write(path, data);
-        }
-        // populate in-mem content from what we just built
-        if let Ok(mut g) = self.content.lock() {
-            for f in &cached.files {
-                if let Some(t) = &f.text {
-                    g.insert(format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms), t.clone());
-                }
-            }
-        }
-    }
-
-    /// Invalidate in-memory and disk walk cache (e.g. after writes).
+    /// Invalidate in-memory cache (e.g. after writes).
     pub fn invalidate(&self) {
         if let Ok(mut g) = self.mem.lock() {
             *g = None;
         }
         if let Ok(mut g) = self.content.lock() {
             g.clear();
-        }
-        if let Some(p) = &self.cache_path {
-            let _ = std::fs::remove_file(p);
         }
     }
 }
