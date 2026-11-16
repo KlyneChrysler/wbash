@@ -1,0 +1,4 @@
+--- FAIL: TestA (0.00s)
+    a_test.go:10: boom
+FAIL
+FAIL	pkg	0.001s

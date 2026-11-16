@@ -524,6 +524,8 @@ name = "w-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
+ "serde",
+ "serde_json",
  "tempfile",
  "wbash-core",
  "wbash-parsers",
@@ -558,6 +560,7 @@ version = "0.1.0"
 dependencies = [
  "ignore",
  "serde",
+ "serde_json",
  "tree-sitter",
  "tree-sitter-go",
  "tree-sitter-python",

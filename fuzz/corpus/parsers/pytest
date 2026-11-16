@@ -1,0 +1,7 @@
+============================= FAILURES =============================
+________ test_x ________
+E   assert 1 == 2
+ tests/test_a.py:12: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_a.py::test_x - assert 1 == 2
+1 failed, 2 passed, 1 skipped in 0.12s

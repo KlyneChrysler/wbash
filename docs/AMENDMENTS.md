@@ -72,7 +72,7 @@ reason and the affected gate/test.
 
 ## A12. Gates/tests status (v0.1 working state)
 - Property-style invariant tests added (`crates/wbash-core/tests/properties.rs`, I1–I7 representative cases) and golden coverage expanded for read/edit/run/check/git/expand/batch/sh/errors (`tests/golden/*`, `crates/wbash-tools/tests/golden.rs`).
-- Fuzz targets exist for args, paths, parsers, and formatter with seed corpora; CI runs smoke fuzz on PR/schedule. Long-running fuzz campaigns and larger corpora are still pending.
+- Fuzz targets expanded (args/path/policy/parser matrix/formatter budgets+formats) with seeded corpora (`fuzz/corpus/*`, 50+ cases incl. edge/large/binary inputs). CI runs `fuzz-quick` on push (2k runs/30s per target) and deeper smoke on PR/schedule (10k runs/120s). Long-running continuous fuzz campaigns remain pending.
 - Estimator calibration (G9) is implemented and gated: `cl100k_base` MAPE 8.36% on `corpus/scrubbed` (`crates/wbash-core/tests/calibration.rs`, `crates/wbash-core/examples/calibrate.rs`, `corpus/expected/estimator.json`).
 - Security/tier/redaction/path-jail checks are exercised in core/tools/adapters tests and a dedicated CI `security` job; broader adversarial matrices remain incremental.
 - CI includes `perf-smoke` warm in-process gating (`crates/wbash-tools/tests/warm_perf.rs`, `bench/warm_gate.py`) and advisory CLI latency reporting (`bench/perf.py`).

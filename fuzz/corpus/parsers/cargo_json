@@ -1,0 +1,1 @@
+{"reason":"compiler-message","message":{"code":{"code":"E0308"},"level":"error","message":"mismatched types","spans":[{"file_name":"src/lib.rs","line_start":3,"line_end":3,"column_start":5,"column_end":6,"is_primary":true,"text":[{"text":"  x + y","highlight_start":5,"highlight_end":6}]}]}}

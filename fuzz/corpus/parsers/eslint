@@ -1,0 +1,1 @@
+[{"filePath":"src/a.js","messages":[{"ruleId":"no-unused-vars","severity":2,"message":"x is defined but never used","line":1,"column":7}],"errorCount":1,"warningCount":0}]

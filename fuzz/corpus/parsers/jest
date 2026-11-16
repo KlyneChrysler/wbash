@@ -1,0 +1,1 @@
+{"testResults":[{"name":"/a.test.js","status":"failed","assertionResults":[{"fullName":"x","status":"failed","failureMessages":["Error: boom"]}]}],"numFailedTests":1,"numPassedTests":0}

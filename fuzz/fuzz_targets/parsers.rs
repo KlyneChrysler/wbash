@@ -7,13 +7,30 @@ use wbash_parsers::ParserRegistry;
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     let reg = ParserRegistry::new();
-    for argv in [
-        vec!["cargo".to_string(), "test".to_string()],
-        vec!["pytest".to_string()],
-        vec!["tsc".to_string()],
-        vec!["go".to_string(), "test".to_string()],
-        vec!["ruff".to_string(), "check".to_string()],
-    ] {
-        let _ = reg.parse(&argv, &Exit::Code(1), &text, &text);
+    let exits = [Exit::Code(0), Exit::Code(1), Exit::Code(2), Exit::Code(101)];
+    let argvs: Vec<Vec<String>> = vec![
+        vec!["cargo".into(), "test".into()],
+        vec!["cargo".into(), "check".into()],
+        vec!["cargo".into(), "clippy".into()],
+        vec!["pytest".into()],
+        vec!["python".into(), "-m".into(), "pytest".into()],
+        vec!["jest".into()],
+        vec!["vitest".into()],
+        vec!["tsc".into()],
+        vec!["eslint".into(), ".".into()],
+        vec!["ruff".into(), "check".into()],
+        vec!["go".into(), "test".into(), "./...".into()],
+        vec!["go".into(), "vet".into(), "./...".into()],
+        vec!["unknowncmd".into()],
+    ];
+    for argv in &argvs {
+        for e in &exits {
+            let _ = reg.parse(argv, e, &text, &text);
+            let _ = reg.parse(argv, e, &text, "");
+            let _ = reg.parse(argv, e, "", &text);
+        }
     }
+    // inject args path
+    let _ = reg.inject_args(&["cargo".into(), "test".into()]);
+    let _ = reg.inject_args(&argvs[data.len() % argvs.len()]);
 });

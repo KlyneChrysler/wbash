@@ -107,7 +107,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-fuzz --locked
       - run: cargo fuzz build
-      - run: cargo fuzz run args -- -runs=2000
-      - run: cargo fuzz run paths -- -runs=2000
-      - run: cargo fuzz run parsers -- -runs=2000
-      - run: cargo fuzz run formatter -- -runs=2000
+      - name: fuzz args
+        run: cargo fuzz run args -- -runs=10000 -max_total_time=120
+      - name: fuzz paths
+        run: cargo fuzz run paths -- -runs=10000 -max_total_time=120
+      - name: fuzz parsers
+        run: cargo fuzz run parsers -- -runs=10000 -max_total_time=120
+      - name: fuzz formatter
+        run: cargo fuzz run formatter -- -runs=10000 -max_total_time=120
+
+
+  fuzz-quick:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo fuzz build
+      - run: cargo fuzz run args -- -runs=2000 -max_total_time=30
+      - run: cargo fuzz run paths -- -runs=2000 -max_total_time=30
+      - run: cargo fuzz run parsers -- -runs=2000 -max_total_time=30
+      - run: cargo fuzz run formatter -- -runs=2000 -max_total_time=30
