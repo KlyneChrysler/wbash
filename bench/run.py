@@ -24,6 +24,23 @@ import tempfile
 import time
 from pathlib import Path
 
+try:
+    import tiktoken
+    _ENC = tiktoken.get_encoding("cl100k_base")
+except Exception:
+    _ENC = None
+
+
+def count_tokens(cmd: str, out: str) -> tuple[int, int]:
+    est = (len(cmd) + len(out)) // 4
+    if _ENC is not None:
+        try:
+            real = len(_ENC.encode(cmd + "\n" + out))
+            return est, real
+        except Exception:
+            pass
+    return est, est
+
 BENCH = Path(__file__).resolve().parent
 ROOT = BENCH.parent
 
@@ -120,11 +137,14 @@ def run_task(task: dict, runner: str, w_bin: Path, timeout: int, verbose: bool =
     workdir, env, temp = prepare(task, w_bin, timeout)
     started = time.perf_counter()
     codes, outputs, tokens = [], [], 0
+    tokens_real = 0
     for cmd in task.get(runner, []):
         code, out, _ = run_shell(cmd, workdir, env, timeout)
         codes.append(code)
         outputs.append(out)
-        tokens += (len(cmd) + len(out)) // 4
+        est, real = count_tokens(cmd, out)
+        tokens += est
+        tokens_real += real
         if verbose:
             print(f"    $ {cmd}\n{out[:2000]}")
     check = task.get("check")
@@ -148,6 +168,7 @@ def run_task(task: dict, runner: str, w_bin: Path, timeout: int, verbose: bool =
         "check_exit": check_code,
         "missing_expect": missing,
         "tokens_est": tokens,
+        "tokens_cl100k": tokens_real,
         "wall_ms": wall_ms,
     }
     if temp is not None:
@@ -186,14 +207,14 @@ def main() -> int:
     runners = [args.runner] if args.runner else [r for r in args.runners.split(",") if r]
 
     results = []
-    print(f"{'task':<24} {'runner':<6} {'ok':<3} {'steps':>5} {'tokens':>7} {'ms':>6}")
+    print(f"{'task':<24} {'runner':<6} {'ok':<3} {'steps':>5} {'tok/4':>7} {'cl100k':>7} {'ms':>6}")
     for task in tasks:
         for runner in runners:
             r = run_task(task, runner, w_bin, args.timeout, args.verbose)
             results.append(r)
             print(
                 f"{r['task']:<24} {r['runner']:<6} {str(r['ok']):<3} "
-                f"{r['steps']:>5} {r['tokens_est']:>7} {r['wall_ms']:>6}"
+                f"{r['steps']:>5} {r['tokens_est']:>7} {r['tokens_cl100k']:>7} {r['wall_ms']:>6}"
             )
 
     summary = {}
@@ -203,6 +224,7 @@ def main() -> int:
             "tasks": len(rows),
             "passed": sum(1 for r in rows if r["ok"]),
             "tokens_est": sum(r["tokens_est"] for r in rows),
+            "tokens_cl100k": sum(r.get("tokens_cl100k", r["tokens_est"]) for r in rows),
             "steps": sum(r["steps"] for r in rows),
             "wall_ms": sum(r["wall_ms"] for r in rows),
             "by_kind": {},
@@ -214,25 +236,30 @@ def main() -> int:
                 "tasks": len(krows),
                 "passed": sum(1 for r in krows if r["ok"]),
                 "tokens_est": sum(r["tokens_est"] for r in krows),
+                "tokens_cl100k": sum(r.get("tokens_cl100k", r["tokens_est"]) for r in krows),
                 "steps": sum(r["steps"] for r in krows),
             }
     print("\nsummary")
     for runner, ssum in summary.items():
         print(
             f"  {runner:<6} passed={ssum['passed']}/{ssum['tasks']} "
-            f"tokens={ssum['tokens_est']} steps={ssum['steps']} ms={ssum['wall_ms']}"
+            f"tok/4={ssum['tokens_est']} cl100k={ssum['tokens_cl100k']} steps={ssum['steps']} ms={ssum['wall_ms']}"
         )
         for k, ks in ssum.get("by_kind", {}).items():
             if not k:
                 continue
             print(
-                f"    - {k:<16} passed={ks['passed']}/{ks['tasks']} tokens={ks['tokens_est']} steps={ks['steps']}"
+                f"    - {k:<16} passed={ks['passed']}/{ks['tasks']} tok/4={ks['tokens_est']} cl100k={ks['tokens_cl100k']} steps={ks['steps']}"
             )
-    if "bash" in summary and "w" in summary and summary["bash"]["tokens_est"]:
-        delta = 100 * (summary["w"]["tokens_est"] - summary["bash"]["tokens_est"]) / summary["bash"]["tokens_est"]
-        print(f"  token delta w vs bash: {delta:+.1f}%")
+    if "bash" in summary and "w" in summary:
+        if summary["bash"]["tokens_est"]:
+            delta = 100 * (summary["w"]["tokens_est"] - summary["bash"]["tokens_est"]) / summary["bash"]["tokens_est"]
+            print(f"  token delta w vs bash (tok/4): {delta:+.1f}%")
+        if summary["bash"].get("tokens_cl100k"):
+            delta_r = 100 * (summary["w"]["tokens_cl100k"] - summary["bash"]["tokens_cl100k"]) / summary["bash"]["tokens_cl100k"]
+            print(f"  token delta w vs bash (cl100k): {delta_r:+.1f}%")
 
-    payload = {"generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "summary": summary, "results": results}
+    payload = {"generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "tokenizer": "cl100k_base" if _ENC else "chars/4", "summary": summary, "results": results}
     if args.save_baseline:
         out = Path(args.save_baseline)
         out.parent.mkdir(parents=True, exist_ok=True)

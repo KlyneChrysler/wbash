@@ -567,7 +567,7 @@ pub fn compact_tail(
         let (i, line, class) = stream[j];
         if let Some(prev) = last_emitted {
             if i > prev + 1 {
-                result.low(format!("...+{} lines (~{href})", i - prev - 1));
+                result.low(format!("...+{} lines ({href})", i - prev - 1));
                 omitted += i - prev - 1;
             }
         }
