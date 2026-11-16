@@ -161,3 +161,29 @@ bad = "fail"
     assert_eq!(run.tests[1].status, TestStatus::Fail);
     assert_eq!(run.tests[1].message.as_deref(), Some("boom"));
 }
+
+#[test]
+fn cargo_injects_before_separator() {
+    let reg = registry();
+    let argv = vec![
+        "cargo".to_string(),
+        "clippy".to_string(),
+        "-q".to_string(),
+        "--".to_string(),
+        "-D".to_string(),
+        "warnings".to_string(),
+    ];
+    let injected = reg.inject_args(&argv);
+    assert_eq!(
+        injected,
+        vec![
+            "cargo",
+            "clippy",
+            "-q",
+            "--message-format=json",
+            "--",
+            "-D",
+            "warnings"
+        ]
+    );
+}

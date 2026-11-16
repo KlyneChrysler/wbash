@@ -107,22 +107,7 @@ pub fn record_output(
     }
 
     if let Some(p) = parsed {
-        if let Some(summary) = &p.summary {
-            if !summary.is_empty() {
-                result.header.push_str(", ");
-                result.header.push_str(summary);
-            }
-        }
-        let diags = p.diagnostics.clone();
-        util::diagnostics_into(result, diags, ctx.root, ctx.handles)?;
-        util::tests_into(result, &p.tests, true);
         let (passed, failed, _skipped) = util::counts_of(&p.tests);
-        if passed > 0 {
-            result.meta.counts.insert("passed".into(), passed as i64);
-        }
-        if failed > 0 {
-            result.meta.counts.insert("failed".into(), failed as i64);
-        }
         let errors = p
             .diagnostics
             .iter()
@@ -133,6 +118,23 @@ pub fn record_output(
             .iter()
             .filter(|d| d.severity == wbash_core::types::Severity::Warn)
             .count();
+        let parse_miss =
+            !output.exit.is_success() && errors == 0 && failed == 0 && p.tests.is_empty();
+        if let Some(summary) = &p.summary {
+            if !summary.is_empty() {
+                result.header.push_str(", ");
+                result.header.push_str(summary);
+            }
+        }
+        let diags = p.diagnostics.clone();
+        util::diagnostics_into(result, diags, ctx.root, ctx.handles)?;
+        util::tests_into(result, &p.tests, true);
+        if passed > 0 {
+            result.meta.counts.insert("passed".into(), passed as i64);
+        }
+        if failed > 0 {
+            result.meta.counts.insert("failed".into(), failed as i64);
+        }
         if errors > 0 {
             result.meta.counts.insert("errors".into(), errors as i64);
         }
@@ -142,9 +144,17 @@ pub fn record_output(
                 .counts
                 .insert("warnings".into(), warnings as i64);
         }
+        if parse_miss && !raw.trim().is_empty() {
+            result.note("parse_miss raw_tail");
+            util::compact_tail(result, &raw, label, ctx.handles, true)?;
+        }
     } else if !raw.trim().is_empty() {
-        result.note("parse_fallback");
-        util::compact_tail(result, &raw, label, ctx.handles, false)?;
+        if !output.exit.is_success() {
+            result.note("parse_miss raw_tail");
+        } else {
+            result.note("parse_fallback");
+        }
+        util::compact_tail(result, &raw, label, ctx.handles, !output.exit.is_success())?;
     }
 
     if let Some(id) = full_ref {
