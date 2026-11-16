@@ -1,82 +1,12 @@
 # w-bash
 
-Agent-native workspace tools with token-efficient output. `w` exposes navigation,
-reading, search, editing, execution, lint checks, git, and handle expansion as
-deterministic, budgeted JSON or `lean@0.2` records. The same surface is served
-over MCP stdio as `w-bash`.
+**w-bash** (`w`) is an agent-native workspace tool for exploring and working in codebases with compact, deterministic output. Instead of dumping raw command results, it returns focused, budget-aware responses for common tasks like navigating files, reading code, searching, editing, running commands, checking builds/tests, and inspecting git.
 
-Status: v0.1.0 development (spec: `docs/spec-v3.md`). Linux/macOS.
+It is designed to help AI agents (and CLIs) get the signal they need with fewer tokens: outputs are ranked and can elide details behind expandable handles so full content is still available when needed. The same tool surface is available both as a CLI and as an MCP server.
 
-## Build and install
+- **Workspace-aware tools:** tree, read, search, edit, run, check, git, batch, expand
+- **Token-efficient output:** structured `lean`/JSON responses that stay within a budget
+- **Deterministic & verifiable:** stable formatting, explicit elisions, and hash/ledger-aware reads
+- **Safe by design:** path confinement, permission tiers, redaction, and gated execution
 
-```sh
-cargo build --release
-install -m 755 target/release/w /usr/local/bin/w
-# optional MCP command name
-install -m 755 target/release/w-bash /usr/local/bin/w-bash
-```
-
-## CLI
-
-```sh
-w tree src --depth 2 --sizes
-w read src/main.rs --lines 1:60
-w search parse_config --mode text src
-w edit src/main.rs find=old replace=new
-w --tier execute run -- cargo test
-w --tier execute check --kind all
-w git status
-w expand '~r7' --grep error
-w gain
-w config show
-```
-
-Global flags: `--root DIR`, `--session ID`, `--format lean|json`, `--budget N`,
-`--tier read_only|write_workspace|git_write|execute`. Default tier is
-`write_workspace`. Destructive tools require an explicit higher tier.
-
-## MCP
-
-```json
-{
-  "mcpServers": {
-    "w-bash": {"command": "w-bash", "args": ["--root", "/path/to/workspace"]}
-  }
-}
-```
-
-Sessions are selected with `_meta.session_id` on `tools/call`; omission uses a
-default session. Exposed tool schemas stay within the 1500-token budget (tested).
-
-## Security defaults
-
-- Path jail: all filesystem arguments resolve under the workspace root (plus
-  configured allowlist); symlink escapes are rejected.
-- Tiers gate writes, git commits/pushes, and process execution.
-- Project config and `.w-bash/` rules require explicit trust
-  (`w config trust`).
-- Environment for executed commands is allowlisted; secrets are redacted before
-  storage and before emission.
-- `sh` is disabled unless `exec.allow_shell=true`.
-- No network, no telemetry.
-
-## Development
-
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
-
-Benchmarks and gates:
-
-```sh
-python3 bench/run.py --runners bash,w      # 30 scripted tasks
-python3 bench/perf.py --strict             # G6-G8 latency smoke
-cargo test -p wbash-core --test calibration # G9 estimator MAPE
-```
-
-Layout: `crates/wbash-{core,index,parsers,tools,adapters,cli}`, tests in
-`crates/*/tests`, goldens in `tests/golden`, fixtures in `tests/fixtures`,
-fuzz targets in `fuzz/`. See `docs/` for wire format, tools, parsers, security,
-and recorded spec amendments.
+See `docs/spec-v3.md` and the `docs/` directory for details.
