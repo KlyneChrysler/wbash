@@ -349,19 +349,53 @@ pub fn strip_toolchain_frames(lines: Vec<String>) -> Vec<String> {
     out
 }
 
-pub fn is_error_line(line: &str) -> bool {
+pub fn is_warning_line(line: &str) -> bool {
     let l = line.to_ascii_lowercase();
-    l.contains("error")
-        || l.contains("failed")
-        || l.contains("failure")
-        || l.contains("exception")
-        || l.contains("panic")
-        || l.contains("traceback")
-        || l.contains("segfault")
-        || l.contains("fatal")
-        || l.contains("undefined reference")
+    let t = l.trim_start();
+    t.starts_with("warning")
+        || t.contains("warning:")
+        || t.contains("warning[")
+        || t.contains(": warning:")
+        || t.contains("] warning")
+}
+
+pub fn is_error_line(line: &str) -> bool {
+    if is_warning_line(line) {
+        return false;
+    }
+    let l = line.to_ascii_lowercase();
+    let t = l.trim_start();
+    t.starts_with("error")
+        || t.contains("error[")
+        || t.contains("error:")
+        || t.contains(" failed")
+        || t.starts_with("failed")
+        || t.starts_with("fail ")
+        || t.contains("failure")
+        || t.contains("exception")
+        || t.contains("panic")
+        || t.contains("panicked at")
+        || t.contains("assertion `")
+        || t.contains("assertion failed")
+        || t.contains("thread '") && t.contains("panicked")
+        || t.contains("traceback")
+        || t.contains("segfault")
+        || t.contains("fatal")
+        || t.contains("undefined reference")
+        || t.contains("could not compile")
+        || t.starts_with("--- fail")
+        || t.starts_with("left:")
+        || t.starts_with("right:")
         || line.contains("✗")
-        || line.contains("error[")
+}
+
+pub fn is_signal_summary_line(line: &str) -> bool {
+    let t = line.trim().to_ascii_lowercase();
+    t.contains("could not compile")
+        || t.starts_with("error: aborting")
+        || t.starts_with("test result:")
+        || (t.starts_with("failures:") && t.len() <= "failures:".len() + 1)
+        || t.contains("test failed")
 }
 
 fn is_error_context_line(line: &str) -> bool {
@@ -372,7 +406,11 @@ fn is_error_context_line(line: &str) -> bool {
         || t.starts_with("= note:")
         || t.starts_with("help:")
         || t.starts_with("note:")
-        || (t.starts_with(' ') && t.contains('^'))
+        || (line.starts_with(' ') && t.contains('^'))
+}
+
+fn is_compact_signal_line(line: &str) -> bool {
+    is_error_line(line) || is_signal_summary_line(line)
 }
 
 /// Generic compaction fallback (spec §7.5): head + error windows + tail.
@@ -402,37 +440,65 @@ pub fn compact_tail(
     let head_n = 8.min(lines.len());
     let tail_n = 6.min(lines.len().saturating_sub(head_n));
     let mut selected: Vec<(usize, &str)> = Vec::new();
-    for (i, l) in lines.iter().enumerate().take(head_n) {
-        selected.push((i, l.as_str()));
+    // Prefer error-focused compaction: if errors/signals exist, keep only error windows and
+    // terminal summaries; collapse warning bodies/noise (counts can remain elsewhere).
+    let has_errors = lines.iter().any(|l| is_compact_signal_line(l));
+    if !has_errors {
+        for (i, l) in lines.iter().enumerate().take(head_n) {
+            selected.push((i, l.as_str()));
+        }
     }
     for (i, l) in lines.iter().enumerate() {
-        if i < head_n || i >= lines.len().saturating_sub(tail_n) {
+        if !has_errors && i < head_n {
             continue;
         }
-        if is_error_line(l) {
-            let end = (i + 5).min(lines.len());
-            for (j, lj) in lines.iter().enumerate().take(end).skip(i) {
-                selected.push((j, lj.as_str()));
-                // keep contiguous context/help block a bit longer if relevant
+        if !has_errors && i >= lines.len().saturating_sub(tail_n) {
+            selected.push((i, l.as_str()));
+            continue;
+        }
+        if is_compact_signal_line(l) {
+            let start = i.saturating_sub(1);
+            let end = (i + 8).min(lines.len());
+            for (j, lj) in lines.iter().enumerate().take(end).skip(start) {
+                let lj_s = lj.as_str();
+                if has_errors && is_warning_line(lj_s) && !is_compact_signal_line(lj_s) {
+                    continue;
+                }
+                if j < i && !(is_error_context_line(lj_s) || is_compact_signal_line(lj_s)) {
+                    continue;
+                }
+                selected.push((j, lj_s));
                 if j > i
-                    && !is_error_line(lj.as_str())
-                    && !is_error_context_line(lj.as_str())
-                    && lj.trim().is_empty()
+                    && !is_compact_signal_line(lj_s)
+                    && !is_error_context_line(lj_s)
+                    && lj_s.trim().is_empty()
                 {
                     break;
                 }
             }
-        } else if is_error_context_line(l) {
-            // include context lines that may be adjacent to errors outside head/tail scan
-            selected.push((i, l.as_str()));
         }
     }
-    for (i, l) in lines
-        .iter()
-        .enumerate()
-        .skip(lines.len().saturating_sub(tail_n))
-    {
-        selected.push((i, l.as_str()));
+    if !has_errors {
+        // tail already added above
+    } else {
+        // ensure terminal summaries near end are kept even if misclassified
+        for (i, l) in lines.iter().enumerate().rev().take(12) {
+            if is_signal_summary_line(l) {
+                selected.push((i, l.as_str()));
+            }
+        }
+    }
+    if selected.is_empty() {
+        for (i, l) in lines.iter().enumerate().take(head_n) {
+            selected.push((i, l.as_str()));
+        }
+        for (i, l) in lines
+            .iter()
+            .enumerate()
+            .skip(lines.len().saturating_sub(tail_n))
+        {
+            selected.push((i, l.as_str()));
+        }
     }
     selected.sort_by_key(|(i, _)| *i);
     selected.dedup_by_key(|(i, _)| *i);
@@ -441,7 +507,7 @@ pub fn compact_tail(
     let mut last_emitted: Option<usize> = None;
     let mut stream: Vec<(usize, &str, ItemClass)> = Vec::with_capacity(selected.len());
     for (i, line) in selected {
-        let class = if is_error_line(line) || is_error_context_line(line) {
+        let class = if is_compact_signal_line(line) || is_error_context_line(line) {
             ItemClass::MustKeep
         } else {
             ItemClass::Low
@@ -510,11 +576,11 @@ pub fn compact_tail(
         }
     }
     let full_line = format!("full: {href}");
-    if need_full {
+    if force_full || need_full {
         if !result
             .items
             .iter()
-            .any(|i| i.lines.iter().any(|l| l == &full_line))
+            .any(|i| i.lines.iter().any(|l| l.starts_with("full: ~")))
         {
             result.must(full_line);
         }
@@ -674,5 +740,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn compact_tail_collapses_warning_bodies_when_error_present() {
+        let dir = tmp("warnerr");
+        let mut hs = HandleStore::open("s", &dir, 3600, 8 << 20, Redactor::new()).unwrap();
+        let mut tr = ToolResult::new("run", "exit 1".to_string());
+        let mut raw = String::new();
+        for i in 0..30 {
+            raw.push_str(&format!(
+                "warning: unused import {i}\n --> src/mod{i}.rs:{i}:5\n  |\n  | use foo;\n\n"
+            ));
+        }
+        raw.push_str("error[E0308]: mismatched types\n --> src/main.rs:42:18\n  |\n42 |     let x: i32 = \"no\";\n  |            ---   ^^^^ expected `i32`, found `&str`\n\n");
+        raw.push_str("error: could not compile `app` due to 1 previous error\n");
+        compact_tail(&mut tr, &raw, "run", &mut hs, true).unwrap();
+        let text = tr
+            .items
+            .iter()
+            .flat_map(|i| i.lines.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("error[E0308]"), "{text}");
+        assert!(text.contains("src/main.rs:42:18"), "{text}");
+        assert!(text.contains("could not compile"), "{text}");
+        assert!(!text.contains("warning: unused import 10"), "{text}");
+        assert!(!text.contains("src/mod10.rs:10:5"), "{text}");
     }
 }

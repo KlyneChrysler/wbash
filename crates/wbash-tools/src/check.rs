@@ -156,8 +156,12 @@ impl Tool for CheckTool {
             .filter(|d| d.severity == Severity::Warn)
             .count();
         let (passed, failed, _) = util::counts_of(&tests);
-        let mut header = if errors == 0 && warnings == 0 && failed == 0 {
-            "ok".to_string()
+        let mut header = if errors == 0 && failed == 0 {
+            if warnings == 0 {
+                "ok".to_string()
+            } else {
+                format!("ok, {warnings} warnings")
+            }
         } else {
             format!("{errors} errors, {warnings} warnings")
         };

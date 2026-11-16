@@ -148,55 +148,81 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
         &mut redactions,
     )?;
 
-    // N1: passthrough/fallback for small unstructured outputs when formatting isn't a win.
+    let build_text = |out: &Vec<String>| -> String {
+        let mut text = out.join("\n");
+        text.push('\n');
+        text
+    };
+
+    // Passthrough/min-gain: for small unstructured outputs (or fully emitted small bodies),
+    // prefer raw body when structured formatting is not a win. Never suppress diagnostics/errors.
     let unstructured = result.diagnostics.is_empty()
-        && result.handles.is_empty()
         && !result
             .meta
             .counts
             .keys()
-            .any(|k| !matches!(k.as_str(), "raw_bytes" | "duration_ms"));
-    if unstructured && !body_from_items {
+            .any(|k| !matches!(k.as_str(), "raw_bytes" | "duration_ms"))
+        && !result.meta.notes.iter().any(|n| n.contains("parse_miss"));
+    let no_omissions = dropped_lines.is_empty();
+    if unstructured && no_omissions {
         if let Some(raw) = result.raw_text.as_deref() {
-            let raw_t = estimator::estimate_text(raw);
-            if let Some(pt) = opts.passthrough_tokens {
-                if raw_t <= pt {
-                    let mut pfx = vec![out[0].clone()];
-                    pfx.extend(
-                        out.iter()
-                            .skip(1)
-                            .take_while(|l| l.starts_with('#'))
-                            .cloned(),
-                    );
-                    let (rraw, rn) = opts.redactor.redact(raw.trim_end_matches(['\n', '\r']));
-                    redactions += rn;
-                    let mut ptext = pfx.join("\n");
-                    ptext.push('\n');
-                    if !rraw.is_empty() {
-                        ptext.push_str(&rraw);
-                        ptext.push('\n');
-                    }
-                    return Ok(Rendered {
-                        out_tokens: estimator::estimate_text(&ptext),
-                        text: ptext,
-                        ok: result.meta.ok,
-                        cli_code: if result.meta.ok { 0 } else { 1 },
-                        is_error: false,
-                        redactions,
-                    });
-                }
-            }
-            let (rraw, rn) = opts.redactor.redact(raw.trim_end_matches(['\n', '\r']));
-            redactions += rn;
+            let raw_trim = raw.trim_end_matches(['\n', '\r']);
+            let raw_body_t = estimator::estimate_text(raw_trim);
+            let structured_text = build_text(&out);
+            let structured_t = estimator::estimate_text(&structured_text);
+            let mut pfx = vec![out[0].clone()];
+            pfx.extend(
+                out.iter()
+                    .skip(1)
+                    .take_while(|l| l.starts_with('#'))
+                    .cloned(),
+            );
+            let (rraw, rn) = opts.redactor.redact(raw_trim);
+            let mut ptext = pfx.join("\n");
+            ptext.push('\n');
             if !rraw.is_empty() {
-                out.push(rraw);
+                ptext.push_str(&rraw);
+                ptext.push('\n');
+            }
+            let pass_t = estimator::estimate_text(&ptext);
+            let small_enough = opts
+                .passthrough_tokens
+                .map(|pt| raw_body_t <= pt)
+                .unwrap_or(false);
+            let insufficient_gain = opts
+                .min_gain_pct
+                .map(|pct| {
+                    if raw_body_t == 0 {
+                        return false;
+                    }
+                    let saved = structured_t.saturating_sub(pass_t);
+                    saved * 100 < raw_body_t.saturating_mul(pct)
+                })
+                .unwrap_or(false);
+            let can_passthrough = (small_enough || insufficient_gain)
+                && (result.handles.is_empty() || !body_from_items || pass_t <= structured_t);
+            if can_passthrough && (small_enough || pass_t <= structured_t) {
+                redactions += rn;
+                return Ok(Rendered {
+                    out_tokens: pass_t,
+                    text: ptext,
+                    ok: result.meta.ok,
+                    cli_code: if result.meta.ok { 0 } else { 1 },
+                    is_error: false,
+                    redactions,
+                });
+            }
+            // fallback: if nothing structured emitted, include raw body
+            if !body_from_items {
+                redactions += rn;
+                if !rraw.is_empty() {
+                    out.push(rraw);
+                }
             }
         }
     }
 
-    let mut text = out.join("\n");
-    text.push('\n');
-
+    let text = build_text(&out);
     Ok(Rendered {
         out_tokens: estimator::estimate_text(&text),
         text,

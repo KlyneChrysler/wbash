@@ -258,3 +258,13 @@ fn pytest_no_tests_summary() {
         .unwrap();
     assert_eq!(run.summary.as_deref(), Some("pytest: no tests ran"));
 }
+
+#[test]
+fn jest_empty_results_summary() {
+    let reg = registry();
+    let jest = serde_json::json!({"numTotalTests": 0, "testResults": []}).to_string();
+    let run = reg
+        .parse(&["jest".into(), "--json".into()], &Exit::Code(0), &jest, "")
+        .unwrap();
+    assert_eq!(run.summary.as_deref(), Some("0 tests"));
+}

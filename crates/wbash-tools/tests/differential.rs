@@ -222,3 +222,33 @@ fn run_failure_never_drops_any_error_marker_lines() {
     assert!(r.text.contains("error: beta"), "{}", r.text);
     assert!(r.text.contains("--> b.rs:2:2"), "{}", r.text);
 }
+
+#[test]
+fn run_env_honors_cargo_target_dir() {
+    let root: PathBuf = std::env::temp_dir().join(format!("wbash-diff-ctd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    copy_fixture(&root);
+    let cache = root.with_extension("cache");
+    let config_home = root.with_extension("config");
+    let target = root.join("custom-target");
+    std::fs::create_dir_all(&target).unwrap();
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_CACHE_HOME", &cache);
+    std::env::set_var("XDG_CONFIG_HOME", &config_home);
+    let mut d = Dispatcher::new(
+        Config::default(),
+        &root,
+        Arc::new(wbash_tools::registry()),
+        Arc::new(ParserRegistry::new()),
+    )
+    .unwrap();
+    d.set_session_tier("d", wbash_core::types::Tier::Execute)
+        .unwrap();
+    let r = d.call(
+        "run",
+        &json!({"argv": ["sh", "-c", "echo $CARGO_TARGET_DIR"], "env": {"CARGO_TARGET_DIR": target.to_string_lossy()}}),
+        "d",
+    );
+    assert!(r.text.contains("custom-target"), "{}", r.text);
+}

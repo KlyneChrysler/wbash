@@ -715,15 +715,20 @@ fn parse_vitest(stdout: &str) -> Option<ParsedRun> {
 }
 
 fn parse_jest_like(root: &Value) -> Option<ParsedRun> {
+    // Accept JSON reporter output even when empty so success summaries/counts are preserved.
+    if root.get("testResults").is_none() && root.get("numTotalTests").is_none() {
+        return None;
+    }
     let results = root
         .get("testResults")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    if results.is_empty() {
-        return None;
-    }
     let mut run = ParsedRun::default();
+    if results.is_empty() {
+        run.summary = Some("0 tests".to_string());
+        return Some(run);
+    }
     for file in &results {
         let file_name = file
             .get("name")

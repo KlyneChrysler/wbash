@@ -91,3 +91,26 @@ reason and the affected gate/test.
 - Tasks are single-line YAML with a minimal parser (no nested YAML). This keeps
   the harness dependency-free and reviewable; richer task schemas should use a
   real YAML dependency if needed.
+
+
+## A16. Injected parser output separation and cargo JSONL stripping
+- Parsers may inject machine-readable flags (e.g. `cargo --message-format=json`). Parsing consumes the injected/machine stream; user-visible rendered output, `raw_text`, and stored `full` handles are derived from a user-relevant stream with injected machine records stripped when not required to preserve a signal (e.g. cargo JSONL `compiler-artifact`/build records).
+- Parse-miss/fallback compaction must not dump injected machine-format noise. Full fidelity remains available via parsing/handles as applicable without leaking JSONL into tails.
+- Reason: token regressions from injected JSON in run/check tails while preserving parse correctness.
+- Tests: `crates/wbash-tools/tests/{differential.rs,invariants.rs}`, parser/golden coverage.
+
+## A17. Error-first compaction and warning collapse
+- When errors/failures/terminal failure summaries are present, compaction prioritizes exit/error/fail signals, failing-test facts, terminal summaries (`could not compile`, aborting, test result), and error-tied code frames/context; warning-only bodies/context are collapsed/counted rather than emitted as blocks. Warning lines are not treated as error anchors.
+- Generic tails preserve first/each error signals and terminal summaries with explicit elision/handles (I1/I2).
+- Reason: large noisy logs kept warning `-->` blocks and risked displacing real error context.
+- Tests: `crates/wbash-tools/src/util.rs` unit tests, differential/invariant parse-miss and no-dropped-marker cases.
+
+## A18. Count-bearing success headers and passthrough/min-gain
+- `run`/`check` headers surface parsed counts when known (e.g. `exit 0, N passed, N warnings`, `ok, N warnings, N passed`); semantic success is no errors/failures, but warnings must be reported.
+- Lean formatter applies passthrough/min-gain for small/unstructured outputs when structured formatting is not a win, avoiding redundant handles/full markers for fully emitted small bodies while never suppressing diagnostics/errors or required elisions.
+- Config: `[output] passthrough_tokens`, `min_gain_pct` (defaults 160/15).
+- Tests: formatter/core and tool golden/invariant coverage.
+
+## A19. Env/toolchain fidelity
+- Child env allowlist (with wildcard/prefix patterns) preserves semantics-relevant toolchain variables (incl. `CARGO_*`/`CARGO_TARGET_DIR`, Rust/Go/Python/Node/Java/Maven/Gradle/etc. families as configured) subject to secret-key denial.
+- Tests: `run_env_allowlist_patterns_apply`, `run_env_honors_cargo_target_dir`.

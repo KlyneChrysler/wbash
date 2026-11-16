@@ -56,21 +56,60 @@ pub fn execute_with_parsers(
         max_output_bytes: ctx.config.exec.max_output_bytes,
     };
     let output = executor::execute(&req)?;
+    let raw_machine = output.combined();
+    let raw_machine_stdout = output.stdout_str();
+    let raw_machine_stderr = output.stderr_str();
     let parsed = if inject {
         ctx.parsers.parse(
             &injected,
             &output.exit,
-            &output.stdout_str(),
-            &output.stderr_str(),
+            &raw_machine_stdout,
+            &raw_machine_stderr,
         )
     } else {
         None
     };
+    let raw_user = if injected != argv {
+        filter_injected_output(&raw_machine, argv, &injected)
+    } else {
+        raw_machine.clone()
+    };
+    let mut user_output = output;
+    if injected != argv {
+        // Prefer user-visible stream; fall back to machine if stripping removed everything unexpectedly.
+        if !raw_user.trim().is_empty() || raw_machine.trim().is_empty() {
+            user_output.stdout = raw_user.into_bytes();
+            user_output.stderr.clear();
+        }
+    }
     Ok(ExecRun {
-        output,
+        output: user_output,
         parsed,
         injected,
     })
+}
+
+fn filter_injected_output(raw: &str, argv: &[String], injected: &[String]) -> String {
+    let cargo_json = argv.first().map(|s| s == "cargo").unwrap_or(false)
+        && injected.iter().any(|a| a == "--message-format=json");
+    if !cargo_json {
+        return raw.to_string();
+    }
+    let mut out: Vec<&str> = Vec::new();
+    for line in raw.lines() {
+        let t = line.trim_start();
+        if t.starts_with('{') && t.ends_with('}') {
+            // Drop injected cargo JSONL machine records from user-visible output.
+            // libtest/human lines are preserved; parser consumes machine stream separately.
+            continue;
+        }
+        out.push(line);
+    }
+    let mut s = out.join("\n");
+    if raw.ends_with('\n') && !s.is_empty() && !s.ends_with('\n') {
+        s.push('\n');
+    }
+    s
 }
 
 pub fn record_output(
@@ -96,20 +135,34 @@ pub fn record_output(
 
     result.raw_text = Some(raw.clone());
     let mut full_ref: Option<String> = None;
-    let parse_miss_pre = if let Some(p) = parsed {
+    let has_structured_pre = if let Some(p) = parsed {
         let (_, failed, _) = util::counts_of(&p.tests);
         let errors = p
             .diagnostics
             .iter()
             .filter(|d| d.severity == wbash_core::types::Severity::Error)
             .count();
-        !output.exit.is_success() && errors == 0 && failed == 0 && p.tests.is_empty()
+        errors > 0
+            || failed > 0
+            || !p.tests.is_empty()
+            || p.summary
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
     } else {
-        !output.exit.is_success()
-    } && !raw.trim().is_empty();
-    let need_handle =
-        (inject_full || raw.len() > 4096 || parsed.is_some() || !output.exit.is_success())
-            && !parse_miss_pre;
+        false
+    };
+    let parse_miss_pre = !output.exit.is_success() && !has_structured_pre && !raw.trim().is_empty();
+    let structured_failure_tail =
+        !output.exit.is_success() && has_structured_pre && !raw.trim().is_empty();
+    // Keep a handle for lossless access when output is non-trivial or we need to show omitted/raw context.
+    let need_handle = !raw.trim().is_empty()
+        && (inject_full
+            || raw.len() > 4096
+            || (!output.exit.is_success() && !structured_failure_tail)
+            || (output.exit.is_success() && parsed.is_some()))
+        && !parse_miss_pre
+        && !structured_failure_tail;
     if need_handle {
         let h = ctx.handles.put(label, raw.as_bytes(), "text")?;
         result.handle(HandleRef {
@@ -133,10 +186,20 @@ pub fn record_output(
             .iter()
             .filter(|d| d.severity == wbash_core::types::Severity::Warn)
             .count();
-        let parse_miss =
-            !output.exit.is_success() && errors == 0 && failed == 0 && p.tests.is_empty();
+        let has_structured = errors > 0
+            || failed > 0
+            || !p.tests.is_empty()
+            || p.summary
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+        let parse_miss = !output.exit.is_success() && !has_structured;
         if let Some(summary) = &p.summary {
-            if !summary.is_empty() {
+            let summary = summary.trim();
+            if !summary.is_empty()
+                && !result.header.contains(summary)
+                && (summary != "0 tests" || !result.header.contains("passed"))
+            {
                 result.header.push_str(", ");
                 result.header.push_str(summary);
             }
@@ -162,11 +225,28 @@ pub fn record_output(
         if parse_miss && !raw.trim().is_empty() {
             result.note("parse_miss raw_tail");
             util::compact_tail(result, &raw, label, ctx.handles, true)?;
+            result
+                .items
+                .retain(|i| !i.lines.iter().any(|l| l.starts_with("full: ~")));
+            // single authoritative full handle for parse-miss raw tail
+            if let Some(h) = result.handles.last() {
+                result.must(format!("full: {}", h.id));
+            }
+        } else if !output.exit.is_success() && !parse_miss && !raw.trim().is_empty() {
+            // keep a compact user-visible tail for extra context (panics, hints) even when parsed
+            util::compact_tail(result, &raw, label, ctx.handles, false)?;
         }
     } else if !raw.trim().is_empty() {
         if !output.exit.is_success() {
             result.note("parse_miss raw_tail");
             util::compact_tail(result, &raw, label, ctx.handles, true)?;
+            result
+                .items
+                .retain(|i| !i.lines.iter().any(|l| l.starts_with("full: ~")));
+            // single authoritative full handle for parse-miss raw tail
+            if let Some(h) = result.handles.last() {
+                result.must(format!("full: {}", h.id));
+            }
         } else {
             for line in raw.lines() {
                 let line = line.trim_end();
@@ -177,18 +257,68 @@ pub fn record_output(
         }
     }
 
-    if let Some(id) = full_ref {
+    let is_parse_miss = result.meta.notes.iter().any(|n| n.contains("parse_miss"));
+    // Ensure lossless handle ref on failures/parse-miss tails even when compaction managed handle.
+    let need_full_ref = !output.exit.is_success() || output.truncated || output.timed_out;
+    if need_full_ref {
+        let has_full = result
+            .items
+            .iter()
+            .any(|i| i.lines.iter().any(|l| l.starts_with("full: ~")));
+        if !has_full {
+            if let Some(id) = full_ref
+                .as_deref()
+                .or_else(|| result.handles.last().map(|h| h.id.as_str()))
+            {
+                result.must(format!("full: {id}"));
+            }
+        }
+    } else if let Some(id) = full_ref {
         let noisy = result
             .items
             .iter()
             .any(|i| i.class == wbash_core::types::ItemClass::Low && i.lines.len() > 40);
-        if (!output.exit.is_success() || noisy)
+        if noisy
             && !result
                 .items
                 .iter()
                 .any(|i| i.lines.iter().any(|l| l == &format!("full: {id}")))
         {
             result.must(format!("full: {id}"));
+        }
+    }
+    if is_parse_miss {
+        // keep exactly one full handle ref (last is authoritative)
+        let full_idxs: Vec<usize> = result
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(i, it)| {
+                if it.lines.iter().any(|l| l.starts_with("full: ~")) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if full_idxs.len() > 1 {
+            let last = *full_idxs.last().unwrap();
+            result.items = result
+                .items
+                .drain(..)
+                .enumerate()
+                .filter_map(|(i, it)| {
+                    if it.lines.iter().any(|l| l.starts_with("full: ~")) {
+                        if i == last {
+                            Some(it)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(it)
+                    }
+                })
+                .collect();
         }
     }
     Ok(())
@@ -275,7 +405,7 @@ impl Tool for RunTool {
             a.env.as_ref(),
             true,
         )?;
-        let header = if run.output.duration_ms >= 1000 {
+        let mut header = if run.output.duration_ms >= 1000 {
             format!(
                 "{}, {}",
                 exit_text(&run.output.exit),
@@ -284,6 +414,22 @@ impl Tool for RunTool {
         } else {
             exit_text(&run.output.exit)
         };
+        if run.output.exit.is_success() {
+            if let Some(p) = run.parsed.as_ref() {
+                let (passed, _failed, _skipped) = util::counts_of(&p.tests);
+                let warnings = p
+                    .diagnostics
+                    .iter()
+                    .filter(|d| d.severity == wbash_core::types::Severity::Warn)
+                    .count();
+                if passed > 0 {
+                    header.push_str(&format!(", {passed} passed"));
+                }
+                if warnings > 0 {
+                    header.push_str(&format!(", {warnings} warnings"));
+                }
+            }
+        }
         let mut result = ToolResult::new("run", header);
         record_output(
             &mut result,
