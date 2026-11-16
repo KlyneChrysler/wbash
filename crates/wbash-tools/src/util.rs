@@ -396,28 +396,51 @@ pub fn compact_tail(
 
     let mut omitted = 0usize;
     let mut last_emitted: Option<usize> = None;
+    let mut stream: Vec<(usize, &str, ItemClass)> = Vec::with_capacity(selected.len());
     for (i, line) in selected {
+        let class = if is_error_line(line) || is_error_context_line(line) {
+            ItemClass::MustKeep
+        } else {
+            ItemClass::Low
+        };
+        stream.push((i, line, class));
+    }
+    let mut j = 0usize;
+    while j < stream.len() {
+        let (i, line, class) = stream[j];
         if let Some(prev) = last_emitted {
             if i > prev + 1 {
                 result.low(format!("...+{} lines (~{href})", i - prev - 1));
                 omitted += i - prev - 1;
             }
         }
-        let class = if is_error_line(line) {
-            ItemClass::MustKeep
-        } else {
-            ItemClass::Low
-        };
-        result.push(Item::new(
-            class,
-            if class == ItemClass::MustKeep {
-                1000.0
+        if class == ItemClass::Low {
+            let mut k = j + 1;
+            while k < stream.len()
+                && stream[k].2 == ItemClass::Low
+                && stream[k].1 == line
+                && stream[k].0 == i + (k - j)
+            {
+                k += 1;
+            }
+            let count = k - j;
+            if count > 1 {
+                result.low(line.to_string());
+                result.low(format!("  ×{count} repeated"));
             } else {
-                2.0
-            },
+                result.push(Item::new(ItemClass::Low, 2.0, vec![line.to_string()]));
+            }
+            last_emitted = Some(stream[k - 1].0);
+            j = k;
+            continue;
+        }
+        result.push(Item::new(
+            ItemClass::MustKeep,
+            1000.0,
             vec![line.to_string()],
         ));
         last_emitted = Some(i);
+        j += 1;
     }
     if let Some(last) = last_emitted {
         if last + 1 < lines.len() {

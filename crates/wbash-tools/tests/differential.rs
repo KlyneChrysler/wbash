@@ -99,3 +99,37 @@ fn search_and_tree_match_reference_tools() {
         .collect();
     assert_eq!(ours, theirs, "tree files");
 }
+
+#[test]
+fn run_parse_miss_preserves_raw_tail_and_single_full_handle() {
+    let root: PathBuf = std::env::temp_dir().join(format!("wbash-diff-rt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    copy_fixture(&root);
+    let cache = root.with_extension("cache");
+    let config_home = root.with_extension("config");
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_CACHE_HOME", &cache);
+    std::env::set_var("XDG_CONFIG_HOME", &config_home);
+    let mut d = Dispatcher::new(
+        Config::default(),
+        &root,
+        Arc::new(wbash_tools::registry()),
+        Arc::new(ParserRegistry::new()),
+    )
+    .unwrap();
+    d.set_session_tier("d", wbash_core::types::Tier::Execute)
+        .unwrap();
+
+    let r = d.call(
+        "run",
+        &json!({"argv": ["sh", "-c", "echo 'error: kaboom'; echo '  --> src/lib.rs:1:2'; exit 2"]}),
+        "d",
+    );
+    assert!(!r.ok, "{}", r.text);
+    assert!(r.text.contains("# parse_miss raw_tail"), "{}", r.text);
+    assert!(r.text.contains("error: kaboom"), "{}", r.text);
+    assert!(r.text.contains("--> src/lib.rs:1:2"), "{}", r.text);
+    let full_count = r.text.matches("full: ~").count();
+    assert_eq!(full_count, 1, "{}", r.text);
+}
