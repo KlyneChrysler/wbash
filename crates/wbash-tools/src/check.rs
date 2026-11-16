@@ -118,7 +118,11 @@ impl Tool for CheckTool {
                 tests.extend(p.tests);
             } else if !run.output.stdout.is_empty() || !run.output.stderr.is_empty() {
                 let raw = run.output.combined();
-                result.note(format!("{label} parse_fallback"));
+                if !run.output.exit.is_success() {
+                    result.note(format!("{label} parse_miss raw_tail"));
+                } else {
+                    result.note(format!("{label} parse_fallback"));
+                }
                 util::compact_tail(&mut result, &raw, "check", ctx.handles, true)?;
             }
             if run.output.truncated {
