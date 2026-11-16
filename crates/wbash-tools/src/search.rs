@@ -112,10 +112,13 @@ impl Tool for SearchTool {
         let mut fallback = false;
         let mut scanned_files = 0usize;
 
-        let walk = ctx.workspace.walk_filtered(Some(&|rel| {
-            util::under(rel, &base_rel) && util::matches_glob(gs.as_ref(), rel)
-        }));
-        for f in &walk.files {
+        let walk = ctx.workspace.walk_cached_arc();
+        let filter =
+            |rel: &str| util::under(rel, &base_rel) && util::matches_glob(gs.as_ref(), rel);
+        for f in walk.files.iter() {
+            if !filter(&f.rel) {
+                continue;
+            }
             scanned_files += 1;
             let Ok(text) = ctx.workspace.read_cached_text(f) else {
                 continue;

@@ -60,7 +60,7 @@ pub struct Workspace {
     root: PathBuf,
     max_entries: usize,
     cache_path: Option<PathBuf>,
-    mem: Mutex<Option<WalkResult>>,
+    mem: Mutex<Option<std::sync::Arc<WalkResult>>>,
     content: Mutex<HashMap<String, String>>,
 }
 
@@ -101,29 +101,33 @@ impl Workspace {
 
     /// Ignore-aware file walk, sorted deterministically by relative path.
     pub fn walk(&self) -> WalkResult {
-        self.walk_filtered(None)
+        (*self.walk_cached()).clone()
+    }
+
+    pub fn walk_cached_arc(&self) -> std::sync::Arc<WalkResult> {
+        self.walk_cached()
     }
 
     pub fn walk_filtered(&self, filter: Option<&dyn Fn(&str) -> bool>) -> WalkResult {
         let base = self.walk_cached();
         if let Some(f) = filter {
-            let files = base.files.into_iter().filter(|e| f(&e.rel)).collect();
+            let files = base.files.iter().filter(|e| f(&e.rel)).cloned().collect();
             WalkResult {
                 files,
                 truncated: base.truncated,
             }
         } else {
-            base
+            (*base).clone()
         }
     }
 
-    fn walk_cached(&self) -> WalkResult {
+    fn walk_cached(&self) -> std::sync::Arc<WalkResult> {
         if let Ok(g) = self.mem.lock() {
             if let Some(w) = g.as_ref() {
                 return w.clone();
             }
         }
-        let w = self.load_disk().unwrap_or_else(|| self.scan());
+        let w = std::sync::Arc::new(self.load_disk().unwrap_or_else(|| self.scan()));
         if let Ok(mut g) = self.mem.lock() {
             *g = Some(w.clone());
         }
