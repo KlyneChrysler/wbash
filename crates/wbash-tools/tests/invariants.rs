@@ -151,6 +151,17 @@ fn tool_invariants() {
     assert!(run.text.starts_with("exit 3"), "{}", run.text);
     assert!(run.text.contains("error: boom"), "{}", run.text);
     assert!(run.text.contains("full: ~"), "{}", run.text);
+    assert_eq!(run.text.matches("full: ~").count(), 1, "{}", run.text);
+
+    let miss = call(
+        &mut d,
+        "run",
+        json!({"argv": ["sh", "-c", "echo 'error[E1]: bad'; echo '  --> x.rs:1:1'; exit 2"]}),
+    );
+    assert!(miss.text.contains("# parse_miss raw_tail"), "{}", miss.text);
+    assert!(miss.text.contains("error[E1]: bad"), "{}", miss.text);
+    assert!(miss.text.contains("--> x.rs:1:1"), "{}", miss.text);
+    assert_eq!(miss.text.matches("full: ~").count(), 1, "{}", miss.text);
     let sh = call(&mut d, "sh", json!({"command": "echo nope"}));
     assert!(sh.text.starts_with("!policy_denied"), "{}", sh.text);
     assert!(sh.text.contains("allow_shell=true"), "{}", sh.text);
