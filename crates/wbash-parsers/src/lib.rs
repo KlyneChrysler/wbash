@@ -150,30 +150,39 @@ impl ParserRegistry {
 
 impl ParserSet for ParserRegistry {
     fn inject_args(&self, argv: &[String]) -> Vec<String> {
-        let mut out = argv.to_vec();
         let Some(entry) = self.matching(argv).into_iter().next() else {
-            return out;
+            return argv.to_vec();
         };
         if entry.inject.is_empty() {
-            return out;
+            return argv.to_vec();
         }
         if let Some(guard) = entry.inject_if_absent {
-            if out
+            if argv
                 .iter()
                 .any(|a| a == guard || a.starts_with(&format!("{guard}=")))
             {
-                return out;
+                return argv.to_vec();
             }
         }
         // For ruff / eslint only inject in the expected subcommand context.
         if matches!(entry.kind, Kind::Ruff) && !argv.iter().any(|a| a == "check") {
-            return out;
+            return argv.to_vec();
         }
-        for flag in &entry.inject {
-            if !out.iter().any(|a| a == flag) {
-                out.push(flag.clone());
-            }
+        let mut flags: Vec<String> = entry
+            .inject
+            .iter()
+            .filter(|f| !argv.iter().any(|a| a == *f))
+            .cloned()
+            .collect();
+        if flags.is_empty() {
+            return argv.to_vec();
         }
+        // Insert before `--` so tool-specific args are not passed to child/args after separator (WS1.1).
+        let pos = argv.iter().position(|a| a == "--").unwrap_or(argv.len());
+        let mut out = Vec::with_capacity(argv.len() + flags.len());
+        out.extend_from_slice(&argv[..pos]);
+        out.append(&mut flags);
+        out.extend_from_slice(&argv[pos..]);
         out
     }
 

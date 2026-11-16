@@ -53,16 +53,25 @@ impl ExecOutput {
     }
 }
 
+fn env_allowed(allow: &[String], key: &str) -> bool {
+    allow.iter().any(|a| {
+        if let Some(prefix) = a.strip_suffix('*') {
+            key.len() >= prefix.len() && key[..prefix.len()].eq_ignore_ascii_case(prefix)
+        } else {
+            a.eq_ignore_ascii_case(key)
+        }
+    })
+}
+
 /// Build the scrubbed child environment: inherited allowlisted keys plus
 /// explicit per-call keys (which must be allowed and are never secret-named).
 pub fn build_env(
     config: &Config,
     per_call: Option<&HashMap<String, String>>,
 ) -> Result<HashMap<String, String>> {
-    let allow: Vec<&str> = config.exec.env_allow.iter().map(String::as_str).collect();
     let mut env = HashMap::new();
     for (k, v) in std::env::vars() {
-        if allow.iter().any(|a| a.eq_ignore_ascii_case(&k)) && !Redactor::is_secret_key(&k) {
+        if env_allowed(&config.exec.env_allow, &k) && !Redactor::is_secret_key(&k) {
             env.insert(k, v);
         }
     }
@@ -74,7 +83,7 @@ pub fn build_env(
     }
     if let Some(extra) = per_call {
         for (k, v) in extra {
-            if !allow.iter().any(|a| a.eq_ignore_ascii_case(k)) {
+            if !env_allowed(&config.exec.env_allow, k) {
                 return Err(WErr::with_hint(
                     "policy_denied",
                     format!("env key '{k}' is not allowed"),
