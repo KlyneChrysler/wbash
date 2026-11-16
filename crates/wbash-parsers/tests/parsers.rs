@@ -208,3 +208,28 @@ fn cargo_success_fact_and_warnings_summary() {
     assert_eq!(run.diagnostics.len(), 1);
     assert_eq!(run.diagnostics[0].severity, Severity::Warn);
 }
+
+#[test]
+fn clean_success_facts_for_json_parsers() {
+    let reg = registry();
+    let eslint = reg
+        .parse(
+            &["eslint".into(), "-f".into(), "json".into()],
+            &Exit::Code(0),
+            "[]",
+            "",
+        )
+        .unwrap();
+    assert_eq!(eslint.summary.as_deref(), Some("eslint ok"));
+    let ruff = reg
+        .parse(
+            &["ruff".into(), "check".into(), ".".into()],
+            &Exit::Code(0),
+            "[]",
+            "",
+        )
+        .unwrap();
+    assert_eq!(ruff.summary.as_deref(), Some("ruff ok"));
+    let tsc = reg.parse(&["tsc".into()], &Exit::Code(0), "", "").unwrap();
+    assert_eq!(tsc.summary.as_deref(), Some("tsc ok"));
+}

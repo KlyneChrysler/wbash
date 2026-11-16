@@ -193,11 +193,11 @@ impl ParserSet for ParserRegistry {
                 Kind::Pytest => parse_pytest(stdout, stderr),
                 Kind::Jest => parse_jest(stdout),
                 Kind::Vitest => parse_vitest(stdout),
-                Kind::Tsc => parse_tsc(stdout, stderr),
-                Kind::Eslint => parse_eslint(stdout),
-                Kind::Ruff => parse_ruff(stdout),
+                Kind::Tsc => parse_tsc(exit, stdout, stderr),
+                Kind::Eslint => parse_eslint(exit, stdout),
+                Kind::Ruff => parse_ruff(exit, stdout),
                 Kind::GoTest => parse_go_test(stdout),
-                Kind::GoVet => parse_go_vet(stdout, stderr),
+                Kind::GoVet => parse_go_vet(exit, stdout, stderr),
                 Kind::Toml(p) => p.parse(stdout, stderr),
             };
             if let Some(mut run) = parsed {
@@ -522,7 +522,7 @@ fn cargo_diagnostic(msg: &Value) -> Option<Diagnostic> {
     })
 }
 
-fn parse_tsc(stdout: &str, stderr: &str) -> Option<ParsedRun> {
+fn parse_tsc(exit: &Exit, stdout: &str, stderr: &str) -> Option<ParsedRun> {
     let re_paren =
         Regex::new(r"^(.*)\((\d+),(\d+)\):\s+(error|warning)\s+([A-Za-z]+\d+)?:?\s*(.*)$").ok()?;
     let re_colon =
@@ -550,13 +550,17 @@ fn parse_tsc(stdout: &str, stderr: &str) -> Option<ParsedRun> {
         });
     }
     if run.diagnostics.is_empty() {
+        if exit.is_success() {
+            run.summary = Some("tsc ok".to_string());
+            return Some(run);
+        }
         return None;
     }
     summarize_diagnostics(&mut run);
     Some(run)
 }
 
-fn parse_eslint(stdout: &str) -> Option<ParsedRun> {
+fn parse_eslint(exit: &Exit, stdout: &str) -> Option<ParsedRun> {
     let root: Value = serde_json::from_str(stdout.trim()).ok()?;
     let files = root.as_array()?;
     let mut run = ParsedRun::default();
@@ -590,13 +594,17 @@ fn parse_eslint(stdout: &str) -> Option<ParsedRun> {
         }
     }
     if run.diagnostics.is_empty() {
+        if exit.is_success() {
+            run.summary = Some("eslint ok".to_string());
+            return Some(run);
+        }
         return None;
     }
     summarize_diagnostics(&mut run);
     Some(run)
 }
 
-fn parse_ruff(stdout: &str) -> Option<ParsedRun> {
+fn parse_ruff(exit: &Exit, stdout: &str) -> Option<ParsedRun> {
     let root: Value = serde_json::from_str(stdout.trim()).ok()?;
     let items = root.as_array()?;
     let mut run = ParsedRun::default();
@@ -630,6 +638,10 @@ fn parse_ruff(stdout: &str) -> Option<ParsedRun> {
         });
     }
     if run.diagnostics.is_empty() {
+        if exit.is_success() {
+            run.summary = Some("ruff ok".to_string());
+            return Some(run);
+        }
         return None;
     }
     summarize_diagnostics(&mut run);
@@ -833,7 +845,7 @@ fn parse_go_test(stdout: &str) -> Option<ParsedRun> {
     Some(run)
 }
 
-fn parse_go_vet(stdout: &str, stderr: &str) -> Option<ParsedRun> {
+fn parse_go_vet(exit: &Exit, stdout: &str, stderr: &str) -> Option<ParsedRun> {
     let re = Regex::new(r"^\s*(?:\./)?(\S+\.go):(\d+):(\d+):\s*(.*)$").ok()?;
     let mut run = ParsedRun::default();
     for line in stdout.lines().chain(stderr.lines()) {
@@ -853,6 +865,10 @@ fn parse_go_vet(stdout: &str, stderr: &str) -> Option<ParsedRun> {
         }
     }
     if run.diagnostics.is_empty() {
+        if exit.is_success() {
+            run.summary = Some("go vet ok".to_string());
+            return Some(run);
+        }
         return None;
     }
     summarize_diagnostics(&mut run);
