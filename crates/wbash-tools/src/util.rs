@@ -577,4 +577,34 @@ mod tests {
         assert!(text.contains("[template ×4]"), "{text}");
         assert!(!text.contains("retry 3 in 30ms"), "{text}");
     }
+
+    #[test]
+    fn compact_tail_never_drops_error_lines() {
+        let dir = tmp("nodrop");
+        let mut hs = HandleStore::open("s", &dir, 3600, 8 << 20, Redactor::new()).unwrap();
+        let mut tr = ToolResult::new("run", "exit 1".to_string());
+        let mut raw = String::new();
+        for i in 0..200 {
+            raw.push_str(&format!("noise {i}\n"));
+        }
+        raw.push_str("error: first failure\n  --> a.rs:1:1\n");
+        for i in 0..200 {
+            raw.push_str(&format!("mid {i}\n"));
+        }
+        raw.push_str("FATAL: second\n");
+        for i in 0..200 {
+            raw.push_str(&format!("tail {i}\n"));
+        }
+        compact_tail(&mut tr, &raw, "run", &mut hs, true).unwrap();
+        let text = tr
+            .items
+            .iter()
+            .flat_map(|i| i.lines.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("error: first failure"), "{text}");
+        assert!(text.contains("--> a.rs:1:1"), "{text}");
+        assert!(text.contains("FATAL: second"), "{text}");
+    }
 }
