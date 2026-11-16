@@ -786,8 +786,11 @@ fn parse_jest_like(root: &Value) -> Option<ParsedRun> {
 fn parse_go_test(stdout: &str) -> Option<ParsedRun> {
     let re_test = Regex::new(r"^\s*--- (FAIL|PASS|SKIP): (\S+)").ok()?;
     let re_diag = Regex::new(r"^\s*(?:\./)?([^:\s]+\.go):(\d+):(\d+):\s*(.*)$").ok()?;
+    let re_pkg = Regex::new(r"^(ok|FAIL)\s+(\S+)").ok();
     let mut run = ParsedRun::default();
     let mut saw = false;
+    let mut pkg_ok = 0usize;
+    let mut pkg_fail = 0usize;
     for line in stdout.lines() {
         if let Some(caps) = re_test.captures(line) {
             saw = true;
@@ -823,6 +826,15 @@ fn parse_go_test(stdout: &str) -> Option<ParsedRun> {
                 message: caps.get(4).map(|m| m.as_str()).unwrap_or("").to_string(),
                 tool: Some("go".to_string()),
             });
+            continue;
+        }
+        if let Some(caps) = re_pkg.as_ref().and_then(|re| re.captures(line.trim())) {
+            saw = true;
+            match caps.get(1).map(|m| m.as_str()).unwrap_or("") {
+                "ok" => pkg_ok += 1,
+                "FAIL" => pkg_fail += 1,
+                _ => {}
+            }
         }
     }
     if !saw {
@@ -832,12 +844,19 @@ fn parse_go_test(stdout: &str) -> Option<ParsedRun> {
     let mut parts = Vec::new();
     if passed > 0 {
         parts.push(format!("{passed} passed"));
+    } else if pkg_ok > 0 && failed == 0 && run.diagnostics.is_empty() {
+        parts.push(format!("{pkg_ok} packages ok"));
     }
     if failed > 0 {
         parts.push(format!("{failed} failed"));
+    } else if pkg_fail > 0 {
+        parts.push(format!("{pkg_fail} packages failed"));
     }
     if !run.diagnostics.is_empty() {
         parts.push(format!("{} errors", run.diagnostics.len()));
+    }
+    if parts.is_empty() && pkg_ok > 0 {
+        parts.push("go test ok".to_string());
     }
     if !parts.is_empty() {
         run.summary = Some(parts.join(", "));

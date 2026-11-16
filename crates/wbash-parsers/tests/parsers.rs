@@ -233,3 +233,18 @@ fn clean_success_facts_for_json_parsers() {
     let tsc = reg.parse(&["tsc".into()], &Exit::Code(0), "", "").unwrap();
     assert_eq!(tsc.summary.as_deref(), Some("tsc ok"));
 }
+
+#[test]
+fn go_test_package_success_summary() {
+    let reg = registry();
+    let out = "ok  \texample.com/pkg\t0.123s\n";
+    let run = reg
+        .parse(
+            &["go".into(), "test".into(), "./...".into()],
+            &Exit::Code(0),
+            out,
+            "",
+        )
+        .unwrap();
+    assert_eq!(run.summary.as_deref(), Some("1 packages ok"));
+}
