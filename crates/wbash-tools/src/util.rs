@@ -267,6 +267,45 @@ pub fn no_ansi_lines(text: &str) -> Vec<String> {
         .collect()
 }
 
+fn is_toolchain_frame(line: &str) -> bool {
+    let l = line.trim();
+    (l.starts_with("at ")
+        || l.contains("::")
+        || l.contains(".rs:")
+        || l.contains(".go:")
+        || l.contains("node_modules")
+        || l.contains("site-packages"))
+        && (l.contains("/rustc/")
+            || l.contains("/rustlib/")
+            || l.contains("library/std")
+            || l.contains("library/core")
+            || l.contains("library/alloc")
+            || l.contains("site-packages/_pytest")
+            || l.contains("node_modules/")
+            || l.contains("internal/modules")
+            || l.contains("<frozen "))
+}
+
+pub fn strip_toolchain_frames(lines: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(lines.len());
+    let mut dropped = 0usize;
+    for line in lines {
+        if is_toolchain_frame(&line) {
+            dropped += 1;
+            continue;
+        }
+        if dropped > 0 {
+            out.push(format!("...+{dropped} std frames"));
+            dropped = 0;
+        }
+        out.push(line);
+    }
+    if dropped > 0 {
+        out.push(format!("...+{dropped} std frames"));
+    }
+    out
+}
+
 pub fn is_error_line(line: &str) -> bool {
     let l = line.to_ascii_lowercase();
     l.contains("error")
@@ -301,10 +340,11 @@ pub fn compact_tail(
     handles: &mut HandleStore,
     force_full: bool,
 ) -> Result<()> {
-    let lines = no_ansi_lines(raw);
+    let mut lines = no_ansi_lines(raw);
     if lines.is_empty() {
         return Ok(());
     }
+    lines = strip_toolchain_frames(lines);
     let raw_bytes = raw.len() as u64;
     let need_full = force_full || raw_bytes > 4096;
     let h = handles.put(label, raw.as_bytes(), "text")?;
