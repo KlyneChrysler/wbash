@@ -290,18 +290,38 @@ fn template_key(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
-        if c.is_ascii_digit() {
-            while matches!(chars.peek(), Some(&d) if d.is_ascii_digit() || d == '.' || d == ':') {
-                chars.next();
-            }
-            out.push_str("<N>");
-        } else if c == '0' && matches!(chars.peek(), Some(&'x' | &'X')) {
+        if c == '0' && matches!(chars.peek(), Some(&'x' | &'X')) {
             out.push(c);
             out.push(chars.next().unwrap());
             while matches!(chars.peek(), Some(&d) if d.is_ascii_hexdigit()) {
                 chars.next();
             }
             out.push_str("<H>");
+        } else if c.is_ascii_hexdigit()
+            && c.is_ascii_alphabetic()
+            && out.ends_with(|ch: char| ch.is_ascii_hexdigit() || ch == '-')
+        {
+            // keep hex-like uuid/hash segments normalized as part of hex runs below
+            out.push(c);
+        } else if c.is_ascii_digit() {
+            while matches!(chars.peek(), Some(&d) if d.is_ascii_digit() || d == '.' || d == ':' || d == '-' || d == 'T' || d == 'Z' || d == '_')
+            {
+                chars.next();
+            }
+            out.push_str("<N>");
+        } else if c.is_ascii_hexdigit() {
+            // long hex/hash tokens
+            let mut len = 1usize;
+            let mut buf = String::from(c);
+            while matches!(chars.peek(), Some(&d) if d.is_ascii_hexdigit()) {
+                buf.push(chars.next().unwrap());
+                len += 1;
+            }
+            if len >= 8 {
+                out.push_str("<H>");
+            } else {
+                out.push_str(&buf);
+            }
         } else {
             out.push(c);
         }
@@ -606,5 +626,22 @@ mod tests {
         assert!(text.contains("error: first failure"), "{text}");
         assert!(text.contains("--> a.rs:1:1"), "{text}");
         assert!(text.contains("FATAL: second"), "{text}");
+    }
+
+    #[test]
+    fn compact_tail_template_preserves_interleaved_errors() {
+        let dir = tmp("tplerr");
+        let mut hs = HandleStore::open("s", &dir, 3600, 8 << 20, Redactor::new()).unwrap();
+        let mut tr = ToolResult::new("run", "exit 1".to_string());
+        let raw = "retry 1\nretry 2\nretry 3\nerror: boom\nretry 4\nretry 5\nretry 6\n";
+        compact_tail(&mut tr, raw, "run", &mut hs, true).unwrap();
+        let text = tr
+            .items
+            .iter()
+            .flat_map(|i| i.lines.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("error: boom"), "{text}");
     }
 }
