@@ -33,10 +33,14 @@ JSON schemas are generated from the same argument structs and exposed over MCP
   + `content`, or `delete=true`. `expect_hash` rejects stale writes. Writes are
   atomic; a post-write syntax check is advisory.
 - `run`: `argv=[...]` (no shell), `cwd="."`, `timeout_ms`, `stdin`, `env`
-  (allowlisted keys only). Exit code/timeout and errors are preserved; full
-  output is stored in a `full: ~id` handle.
+  (allowlisted keys only). Parsers consume injected/machine streams when used,
+  while rendered tails/`raw_text`/`full` handles use user-relevant output with
+  injected machine records stripped. Headers include parsed counts when known
+  (e.g. passed/warnings/errors); failures preserve error/test signals and terminal
+  summaries with compact tails and a `full: ~id` handle as needed.
 - `check`: `kind="all"|"build"|"lint"|"type"|"test"`, `path="."`. Runs detected
-  project commands (Cargo, npm scripts, pytest, go, ruff, tsc, etc.).
+  project commands (Cargo, npm scripts, pytest, go, ruff, tsc, etc.) and
+  reports count-bearing headers (`ok, N warnings, N passed` / errors/failures).
 - `git`: `op` (`status`, `diff`, `log`, `show`, `blame`, `branch`, `commit`,
   `push`) plus op fields: `pathspec`, `staged`, `context`, `limit`, `ref`,
   `path`, `lines`, `message`, `all`, `allow_empty`, `remote`, `branch`,

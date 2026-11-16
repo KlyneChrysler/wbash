@@ -2,8 +2,10 @@
 
 `run` and `check` map command output to normalized `Diagnostic` and
 `TestResult` records. Parsing is selected by argv and applied to stdout; stderr
-is scanned as a fallback. The raw output always remains available in the `full`
-handle.
+is scanned as a fallback. Parsing may use injected machine-readable flags/streams; user-visible output,
+compact tails, and stored full handles are derived from user-relevant output with
+injected machine records stripped when not required to preserve signals. Lossless
+access remains available via handles/expand as applicable.
 
 ## Native parsers
 

@@ -26,7 +26,9 @@ no blank separator lines. Output is deterministic for fixed inputs and state.
   `expand` to the exact omitted payload until TTL/cap eviction.
 - Error, failure, exit, timeout, redaction, and security records are must-keep:
   the budget fitter emits them even when it exceeds the budget, then appends
-  `# budget_exceeded_must_keep`.
+  `# budget_exceeded_must_keep`. On error/failure paths, compaction prioritizes
+  error signals, failing-test facts, error-tied context/frames, and terminal
+  summaries; warning-only bodies are collapsed/counted rather than emitted.
 - Paths are workspace-relative with `/`. Indentation is semantic only (tree
   depth, outline nesting).
 - Durations: `Nms` below 10s, otherwise `N.Ns`.
@@ -99,11 +101,13 @@ src/config.rs:2: pub fn parse_config(path: &str) -> Result<String, String> {
 src/main.rs:4: let _ = config::parse_config("x");
 
 # run failure
-exit 101, 43ms
-# parse_fallback
+exit 101, 43ms, 1 passed, 1 failed
 test result: FAILED. 1 passed; 1 failed
 FAIL fails
 full: ~r7
+
+# run/check success (counts when known)
+exit 0, 12 passed, 2 warnings
 
 # error
 !ambiguous_anchor 2 matches in dup.txt at 1:1, 2:1. try: w edit path=dup.txt lines=1:1 replace="..."
