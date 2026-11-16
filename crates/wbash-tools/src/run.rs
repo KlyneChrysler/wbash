@@ -233,8 +233,11 @@ pub fn record_output(
                 result.must(format!("full: {}", h.id));
             }
         } else if !output.exit.is_success() && !parse_miss && !raw.trim().is_empty() {
-            // keep a compact user-visible tail for extra context (panics, hints) even when parsed
-            util::compact_tail(result, &raw, label, ctx.handles, false)?;
+            // Avoid duplicating structured failure facts; add compact tail only when parsed output
+            // lacks concrete failure/error records (extra panics/hints/context).
+            if !(failed > 0 || errors > 0) {
+                util::compact_tail(result, &raw, label, ctx.handles, false)?;
+            }
         }
     } else if !raw.trim().is_empty() {
         if !output.exit.is_success() {
