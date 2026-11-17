@@ -160,10 +160,14 @@ impl Tool for CheckTool {
             if warnings == 0 {
                 "ok".to_string()
             } else {
-                format!("ok, {warnings} warnings")
+                format!("ok, {}", util::plural(warnings, "warning"))
             }
         } else {
-            format!("{errors} errors, {warnings} warnings")
+            format!(
+                "{}, {}",
+                util::plural(errors, "error"),
+                util::plural(warnings, "warning")
+            )
         };
         if failed > 0 && !header.contains("failed") {
             header.push_str(&format!(", {failed} failed"));

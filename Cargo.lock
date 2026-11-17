@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "wbash-adapters"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -580,7 +580,7 @@ dependencies = [
 
 [[package]]
 name = "wbash-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "wbash-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "blake3",
  "libc",
@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "wbash-index"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ignore",
  "serde",
@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "wbash-parsers"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "regex",
  "serde",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "wbash-tools"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "globset",
  "regex",

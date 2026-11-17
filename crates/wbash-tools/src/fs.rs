@@ -100,10 +100,10 @@ impl Tool for TreeTool {
         let mut result = ToolResult::new(
             "tree",
             format!(
-                "{}/ ({} files, {} dirs)",
+                "{}/ ({}, {})",
                 util::display_path(ctx.root, &base),
-                root.file_count(),
-                root.dir_count()
+                util::plural(root.file_count(), "file"),
+                util::plural(root.dir_count(), "dir")
             ),
         );
         if walk.truncated {
@@ -238,6 +238,8 @@ struct ReadArgs {
     #[serde(default)]
     outline: bool,
     expect_hash: Option<String>,
+    #[serde(default)]
+    force: bool,
 }
 
 impl Tool for ReadTool {
@@ -258,7 +260,8 @@ impl Tool for ReadTool {
                 "lines": {"type": "string"},
                 "symbol": {"type": "string"},
                 "outline": {"type": "boolean", "default": false},
-                "expect_hash": {"type": "string"}
+                "expect_hash": {"type": "string"},
+                "force": {"type": "boolean", "default": false}
             },
             "required": ["path"],
             "additionalProperties": false
@@ -268,7 +271,7 @@ impl Tool for ReadTool {
         let a: ReadArgs = parse_args(
             args.clone(),
             "read",
-            "pass path plus optional lines, symbol, outline, expect_hash",
+            "pass path plus optional lines, symbol, outline, expect_hash, force",
         )?;
         let abs = ctx.resolve(&a.path, true)?;
         if abs.is_dir() {
@@ -428,12 +431,25 @@ impl Tool for ReadTool {
         };
         let ttl = ctx.config.session.ledger_ttl_secs;
         let now = now_ms();
-        let previous = ctx.ledger.read_entry(&display, scope, ttl, now).cloned();
+        let previous = if a.force {
+            None
+        } else {
+            ctx.ledger.read_entry(&display, scope, ttl, now).cloned()
+        };
         if let Some(prev) = &previous {
             if prev.full_hash == full_hex {
-                let mut r = ToolResult::new("read", format!("unchanged {display} ({short})"));
-                r.meta.counts.insert("lines".into(), line_count as i64);
-                return Ok(r);
+                if let Some(snap) = prev
+                    .snapshot_ref
+                    .as_ref()
+                    .filter(|id| ctx.handles.get(id).is_ok())
+                {
+                    let mut r = ToolResult::new(
+                        "read",
+                        format!("unchanged {display} ({short}) expand {snap}"),
+                    );
+                    r.meta.counts.insert("lines".into(), line_count as i64);
+                    return Ok(r);
+                }
             }
         }
 
@@ -859,10 +875,13 @@ impl Tool for EditTool {
         ctx.ledger.invalidate_path(&display);
         let new_hex = hash::hash_bytes(new.as_bytes());
         let short = hash::short(&new_hex);
-        let mut r = ToolResult::new(
-            "edit",
-            format!("edited {display} (+{ins} -{del}) ({short})"),
-        );
+        let detailed = ctx.config.output.edit_confirm == "detailed";
+        let header = if detailed {
+            format!("edited {display} (+{ins} -{del}) ({short})")
+        } else {
+            format!("edited {display} (+{ins} -{del})")
+        };
+        let mut r = ToolResult::new("edit", header);
         r.meta.counts.insert("inserted".into(), ins as i64);
         r.meta.counts.insert("deleted".into(), del as i64);
         post_check(&mut r, ctx, &abs, &new)?;

@@ -119,3 +119,38 @@ reason and the affected gate/test.
 ## A20. Multi-path search
 - `search` accepts multiple scope paths (`paths`/multiple positional CLI paths) so a single query can span several roots (e.g. `w search old_name src tests`) without missing matches outside the first path.
 - Tests: CLI/task coverage in scripted bench rename flows.
+
+
+## A21. Output verbosity and minimal success (spec v3.2)
+- Lean `verbosity` (`minimal` default, `normal`, `verbose`) controls success detail: minimal emits count-bearing summaries and omits redundant boilerplate/low-signal bodies on clean success; failures/warnings preserve must-keep signals (I1/I2). CLI: `--verbosity`.
+- `output.edit_confirm` (`compact` default, `detailed`) controls edit confirmations (`edited <path> (+ins -del)` vs includes hash).
+- Config: `[output] verbosity`, `edit_confirm`. Tests: goldens updated for compact edit/minimal success behavior.
+
+## A22. Run/check success compression and handle discipline
+- In minimal mode, successful `run/check` avoid dumping full bodies when summary/counts suffice; lossless handles retained when needed for failures/elisions/truncation or verbose mode.
+- Goal: reduce verify/success token cost (observed gap vs RTK) without dropping error/fail facts.
+
+## A23. Reference reuse and benchmark fairness (planned/strengthened)
+- I8: prefer `unchanged`/handle refs for identical verified in-session scopes (ledger-backed).
+- Benchmark claims must use fair command mapping for baselines (incl. RTK) and agentic E2E protocol (pinned model/harness, turns/retries/model tokens) for “beats X” assertions; scripted benchmarks remain required evidence.
+
+## A24. Binary detection boundary fix
+- `is_binary` now checks the full buffer: NUL bytes or invalid UTF-8 mark a file binary, while an incomplete trailing multi-byte sequence (`Utf8Error::error_len() == None`) is text. Previously a code point split at the 8192-byte probe boundary misclassified valid text (e.g. `gh_cmd.rs`), and `search` silently returned `0 matches`.
+- Zero-result `search` now notes `# skipped N binary file(s)` when binary files were skipped.
+- Tests: `crates/wbash-index` unit tests (boundary split, truncated tail, invalid byte, NUL) and search/tool coverage.
+
+## A25. Git habit flags (`-n`, display flags)
+- `w git log -n 50` / `-n50` / `--limit 50` map to the tool `limit`; `--oneline`, `--graph`, `--decorate`, `--no-pager` are accepted as display-only. Unknown short flags are rejected with a hint instead of becoming a bogus `ref`.
+- Tests: `crates/wbash-cli` `build_git_args` unit tests.
+
+## A26. CLI exit-code propagation for `run`/`sh`
+- `run`/`sh` propagate the child exit code when nonzero (clamped to 1..=255); timeout maps to `124`. Other tool/domain failures stay `1`; invocation/policy stays `2`; internal stays `70`. MCP `isError` semantics are unchanged (content still carries the exit fact).
+- Tests: `crates/wbash-tools/tests/invariants.rs` (child exit 3).
+
+## A27. Recoverable `unchanged` reads
+- `unchanged <path> (b3:...)` appends `expand ~h` when the snapshot handle is still valid; if the handle is gone the content is re-emitted. `read force=true` bypasses the ledger short-circuit and diff view.
+- Tests: `crates/wbash-tools/tests/{invariants.rs,golden.rs}`, `tests/golden/read/unchanged.lean`.
+
+## A28. Bounded compiler/linter hints
+- Cargo JSON `children` with level `help`/`note` (first two) and ESLint `suggestions[].desc` are appended to the diagnostic message as `; help: ...`, capped at 300 chars total. Generic tails already retain `= help:`/`= note:` within the error window.
+- Tests: `crates/wbash-parsers/tests/parsers.rs`.

@@ -21,6 +21,7 @@ pub struct Global {
     pub config: Option<PathBuf>,
     pub no_project_config: bool,
     pub tier: Option<String>,
+    pub verbosity: Option<String>,
 }
 
 impl Default for Global {
@@ -33,6 +34,7 @@ impl Default for Global {
             config: None,
             no_project_config: false,
             tier: None,
+            verbosity: None,
         }
     }
 }
@@ -50,6 +52,7 @@ const BOOLEANS: &[&str] = &[
     "stats",
     "json",
     "quiet",
+    "force",
 ];
 
 pub fn run(argv: Vec<String>) -> i32 {
@@ -169,6 +172,9 @@ fn run_inner(argv: Vec<String>) -> Result<i32> {
     }
 
     let mut dispatcher = build_dispatcher(&global, true)?;
+    if let Some(v) = &global.verbosity {
+        dispatcher.config_mut().output.verbosity = v.clone();
+    }
     if let Some(tier) = &global.tier {
         let t: Tier = tier.parse()?;
         dispatcher.set_session_tier(&global.session, t)?;
@@ -225,6 +231,9 @@ fn parse_global(argv: &[String]) -> Result<(Global, Option<String>, Vec<String>)
             "--tier" => {
                 g.tier = Some(next(argv, &mut i, "--tier")?);
             }
+            "--verbosity" => {
+                g.verbosity = Some(next(argv, &mut i, "--verbosity")?);
+            }
             "--no-project-config" => {
                 g.no_project_config = true;
                 i += 1;
@@ -238,7 +247,7 @@ fn parse_global(argv: &[String]) -> Result<(Global, Option<String>, Vec<String>)
             other if other.starts_with('-') => {
                 return Err(WErr::invalid_args(
                     format!("unknown global option '{other}'"),
-                    "globals: --root --session --format --budget --config --tier --no-project-config",
+                    "globals: --root --session --format --budget --config --tier --verbosity --no-project-config",
                 ));
             }
             _ => {
@@ -286,6 +295,15 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
                 ));
             }
             insert_value(&mut obj, "message", Value::String(tokens[i].clone()));
+            i += 1;
+            continue;
+        }
+        if tool == "git"
+            && matches!(
+                tok.as_str(),
+                "--oneline" | "--no-pager" | "--graph" | "--decorate"
+            )
+        {
             i += 1;
             continue;
         }
@@ -372,6 +390,19 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
         i += 1;
     }
     Ok((obj, positionals, after_dd))
+}
+
+fn parse_count(s: &str, flag: &str) -> Result<u32> {
+    let n: u32 = s.parse().map_err(|_| {
+        WErr::invalid_args(format!("bad {flag} value '{s}'"), format!("{flag} <count>"))
+    })?;
+    if n == 0 {
+        return Err(WErr::invalid_args(
+            format!("{flag} must be at least 1"),
+            format!("{flag} <count>"),
+        ));
+    }
+    Ok(n)
 }
 
 fn parse_scalar(s: &str) -> Value {
@@ -489,9 +520,37 @@ fn build_git_args(obj: &mut Map<String, Value>, pos: &[String]) -> Result<()> {
             }
         }
         "log" => {
-            if let Some(r) = rest.first() {
-                if !obj.contains_key("ref") {
-                    obj.insert("ref".into(), Value::String(r.clone()));
+            let mut ref_seen = obj.contains_key("ref");
+            let mut it = rest.iter();
+            while let Some(tok) = it.next() {
+                if tok == "-n" {
+                    let Some(v) = it.next() else {
+                        return Err(WErr::invalid_args("-n requires a value", "-n <count>"));
+                    };
+                    obj.insert("limit".into(), Value::Number(parse_count(v, "-n")?.into()));
+                } else if let Some(raw) = tok.strip_prefix("-n") {
+                    obj.insert(
+                        "limit".into(),
+                        Value::Number(parse_count(raw, "-n")?.into()),
+                    );
+                } else if matches!(
+                    tok.as_str(),
+                    "--oneline" | "--no-pager" | "--graph" | "--decorate"
+                ) {
+                    continue;
+                } else if tok.starts_with('-') {
+                    return Err(WErr::invalid_args(
+                        format!("git log: unsupported flag '{tok}'"),
+                        "supported: -n <count>, --limit <count>",
+                    ));
+                } else if !ref_seen {
+                    obj.insert("ref".into(), Value::String(tok.clone()));
+                    ref_seen = true;
+                } else {
+                    return Err(WErr::invalid_args(
+                        format!("git log: unexpected positional '{tok}'"),
+                        "git log [-n <count>] [ref]",
+                    ));
                 }
             }
         }
@@ -737,4 +796,50 @@ pub fn run_mcp(argv: Vec<String>) -> i32 {
 
 pub fn util_map(pairs: &[(&str, i64)]) -> BTreeMap<String, i64> {
     config::counts_map(pairs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_git_args;
+    use serde_json::{Map, Value};
+
+    fn log_args(rest: &[&str]) -> Map<String, Value> {
+        let mut obj = Map::new();
+        let mut pos = vec!["log".to_string()];
+        pos.extend(rest.iter().map(|s| s.to_string()));
+        build_git_args(&mut obj, &pos).unwrap();
+        obj
+    }
+
+    #[test]
+    fn git_log_short_count_is_parsed() {
+        assert_eq!(log_args(&["-n", "50"])["limit"], Value::from(50));
+    }
+
+    #[test]
+    fn git_log_attached_count_and_ref_are_parsed() {
+        let a = log_args(&["-n50", "main"]);
+        assert_eq!(a["limit"], Value::from(50));
+        assert_eq!(a["ref"], Value::from("main"));
+    }
+
+    #[test]
+    fn git_log_display_flags_are_ignored() {
+        let a = log_args(&["--oneline", "-n", "5"]);
+        assert_eq!(a["limit"], Value::from(5));
+    }
+
+    #[test]
+    fn git_log_missing_count_errors() {
+        let mut obj = Map::new();
+        let pos = vec!["log".to_string(), "-n".to_string()];
+        assert!(build_git_args(&mut obj, &pos).is_err());
+    }
+
+    #[test]
+    fn git_log_unknown_short_flag_errors() {
+        let mut obj = Map::new();
+        let pos = vec!["log".to_string(), "-p".to_string()];
+        assert!(build_git_args(&mut obj, &pos).is_err());
+    }
 }

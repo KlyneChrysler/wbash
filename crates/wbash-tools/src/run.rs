@@ -156,7 +156,9 @@ pub fn record_output(
     let structured_failure_tail =
         !output.exit.is_success() && has_structured_pre && !raw.trim().is_empty();
     // Keep a handle for lossless access when output is non-trivial or we need to show omitted/raw context.
+    let minimal_success = output.exit.is_success() && ctx.config.output.verbosity != "verbose";
     let need_handle = !raw.trim().is_empty()
+        && !minimal_success
         && (inject_full
             || raw.len() > 4096
             || (!output.exit.is_success() && !structured_failure_tail)
@@ -251,10 +253,38 @@ pub fn record_output(
                 result.must(format!("full: {}", h.id));
             }
         } else {
-            for line in raw.lines() {
-                let line = line.trim_end();
-                if !line.is_empty() {
-                    result.low(line.to_string());
+            // Success: keep compact. In verbose mode include raw body; otherwise rely on header/counts
+            // and emit only a short tail if non-trivial (lossless via handle/raw_text).
+            let verbose = ctx.config.output.verbosity == "verbose";
+            if verbose {
+                for line in raw.lines() {
+                    let line = line.trim_end();
+                    if !line.is_empty() {
+                        result.low(line.to_string());
+                    }
+                }
+            } else {
+                // keep at most a few informative summary-like lines
+                let lines: Vec<_> = raw
+                    .lines()
+                    .map(|l| l.trim_end())
+                    .filter(|l| !l.is_empty())
+                    .collect();
+                if !lines.is_empty() && (lines.len() <= 6 || raw.len() <= 200) {
+                    for l in &lines {
+                        result.low((*l).to_string());
+                    }
+                } else {
+                    // prefer tail summary lines (e.g. "test result: ok...")
+                    for l in lines.iter().rev().take(4).rev() {
+                        if l.contains("test result")
+                            || l.contains("passed")
+                            || l.contains("ok")
+                            || l.starts_with("Finished")
+                        {
+                            result.low((*l).to_string());
+                        }
+                    }
                 }
             }
         }
@@ -277,11 +307,13 @@ pub fn record_output(
             }
         }
     } else if let Some(id) = full_ref {
+        let verbose = ctx.config.output.verbosity == "verbose";
         let noisy = result
             .items
             .iter()
             .any(|i| i.class == wbash_core::types::ItemClass::Low && i.lines.len() > 40);
-        if noisy
+        if verbose
+            && noisy
             && !result
                 .items
                 .iter()
@@ -425,11 +457,12 @@ impl Tool for RunTool {
                     .iter()
                     .filter(|d| d.severity == wbash_core::types::Severity::Warn)
                     .count();
-                if passed > 0 {
+                let summary_lc = p.summary.as_deref().unwrap_or("").to_ascii_lowercase();
+                if passed > 0 && !summary_lc.contains("passed") {
                     header.push_str(&format!(", {passed} passed"));
                 }
-                if warnings > 0 {
-                    header.push_str(&format!(", {warnings} warnings"));
+                if warnings > 0 && !summary_lc.contains("warning") {
+                    header.push_str(&format!(", {}", util::plural(warnings, "warning")));
                 }
             }
         }

@@ -13,6 +13,7 @@ pub struct RenderOptions<'a> {
     pub redactor: &'a Redactor,
     pub passthrough_tokens: Option<u32>,
     pub min_gain_pct: Option<u32>,
+    pub verbosity: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -199,7 +200,11 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
                     saved * 100 < raw_body_t.saturating_mul(pct)
                 })
                 .unwrap_or(false);
-            let can_passthrough = (small_enough || insufficient_gain)
+            let minimal_tool_success = result.meta.ok
+                && matches!(opts.verbosity.as_deref(), Some("minimal"))
+                && matches!(result.tool, "run" | "sh" | "check");
+            let can_passthrough = !minimal_tool_success
+                && (small_enough || insufficient_gain)
                 && (result.handles.is_empty() || !body_from_items || pass_t <= structured_t);
             if can_passthrough && (small_enough || pass_t <= structured_t) {
                 redactions += rn;
@@ -207,13 +212,13 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
                     out_tokens: pass_t,
                     text: ptext,
                     ok: result.meta.ok,
-                    cli_code: if result.meta.ok { 0 } else { 1 },
+                    cli_code: cli_code_for(result),
                     is_error: false,
                     redactions,
                 });
             }
             // fallback: if nothing structured emitted, include raw body
-            if !body_from_items {
+            if !body_from_items && !minimal_tool_success {
                 redactions += rn;
                 if !rraw.is_empty() {
                     out.push(rraw);
@@ -227,7 +232,7 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
         out_tokens: estimator::estimate_text(&text),
         text,
         ok: result.meta.ok,
-        cli_code: if result.meta.ok { 0 } else { 1 },
+        cli_code: cli_code_for(result),
         is_error: false,
         redactions,
     })
@@ -332,10 +337,24 @@ pub fn render_json(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
         out_tokens: estimator::estimate_text(&text),
         text,
         ok: result.meta.ok,
-        cli_code: if result.meta.ok { 0 } else { 1 },
+        cli_code: cli_code_for(result),
         is_error: false,
         redactions,
     })
+}
+
+fn cli_code_for(result: &ToolResult) -> i32 {
+    if result.meta.ok {
+        return 0;
+    }
+    if matches!(result.tool, "run" | "sh") {
+        return match result.meta.exit {
+            Some(crate::types::Exit::Code(c)) if c != 0 => c.clamp(1, 255),
+            Some(crate::types::Exit::Timeout) => 124,
+            _ => 1,
+        };
+    }
+    1
 }
 
 pub fn render(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rendered> {

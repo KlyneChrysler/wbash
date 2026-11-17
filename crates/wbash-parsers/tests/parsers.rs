@@ -204,7 +204,7 @@ fn cargo_success_fact_and_warnings_summary() {
         )
         .unwrap();
     assert_eq!(run.parser.as_deref(), Some("cargo"));
-    assert_eq!(run.summary.as_deref(), Some("check ok, 1 warnings"));
+    assert_eq!(run.summary.as_deref(), Some("check ok, 1 warning"));
     assert_eq!(run.diagnostics.len(), 1);
     assert_eq!(run.diagnostics[0].severity, Severity::Warn);
 }
@@ -267,4 +267,51 @@ fn jest_empty_results_summary() {
         .parse(&["jest".into(), "--json".into()], &Exit::Code(0), &jest, "")
         .unwrap();
     assert_eq!(run.summary.as_deref(), Some("0 tests"));
+}
+
+#[test]
+fn cargo_help_and_note_children_are_kept() {
+    let reg = registry();
+    let stdout = r#"{"reason":"compiler-message","message":{"level":"error","message":"cannot find value `foo`","code":{"code":"E0425"},"spans":[{"file_name":"src/main.rs","line_start":2,"column_start":5,"is_primary":true}],"children":[{"level":"help","message":"a local variable with a similar name exists: `fop`"},{"level":"note","message":"second note"},{"level":"help","message":"third hint is dropped"}]}}"#;
+    let run = reg
+        .parse(
+            &["cargo".to_string(), "check".to_string()],
+            &Exit::Code(101),
+            stdout,
+            "",
+        )
+        .unwrap();
+    let msg = &run.diagnostics[0].message;
+    assert!(msg.contains("; help: a local variable"), "{msg}");
+    assert!(msg.contains("second note"), "{msg}");
+    assert!(!msg.contains("third hint"), "{msg}");
+}
+
+#[test]
+fn eslint_suggestion_descriptions_are_kept() {
+    let reg = registry();
+    let eslint = json!([{
+        "filePath": "src/a.js",
+        "messages": [{
+            "line": 4, "column": 2, "severity": 2,
+            "ruleId": "no-unused-vars", "message": "unused",
+            "suggestions": [{"desc": "Remove the unused variable."}]
+        }]
+    }])
+    .to_string();
+    let run = reg
+        .parse(
+            &["eslint".to_string(), "-f".to_string(), "json".to_string()],
+            &Exit::Code(1),
+            &eslint,
+            "",
+        )
+        .unwrap();
+    assert!(
+        run.diagnostics[0]
+            .message
+            .contains("Remove the unused variable."),
+        "{}",
+        run.diagnostics[0].message
+    );
 }

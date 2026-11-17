@@ -86,6 +86,13 @@ fn tool_invariants() {
         "{}",
         r2.text
     );
+    assert!(r2.text.contains("expand ~"), "{}", r2.text);
+    let forced = call(
+        &mut d,
+        "read",
+        json!({"path": "src/config.rs", "force": true}),
+    );
+    assert!(forced.text.contains("1: //! Config."), "{}", forced.text);
 
     // external change -> diff with new-file line numbers
     std::fs::write(
@@ -110,7 +117,7 @@ fn tool_invariants() {
     );
     assert!(e.ok, "{}", e.text);
     assert!(
-        e.text.starts_with("edited src/config.rs (+1 -1) (b3:"),
+        e.text.starts_with("edited src/config.rs (+1 -1)"),
         "{}",
         e.text
     );
@@ -147,7 +154,7 @@ fn tool_invariants() {
         "run",
         json!({"argv": ["sh", "-c", "echo out; echo 'error: boom' >&2; exit 3"]}),
     );
-    assert_eq!(run.cli_code, 1);
+    assert_eq!(run.cli_code, 3);
     assert!(run.text.starts_with("exit 3"), "{}", run.text);
     assert!(run.text.contains("error: boom"), "{}", run.text);
     assert!(run.text.contains("full: ~"), "{}", run.text);

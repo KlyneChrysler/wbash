@@ -76,6 +76,10 @@ impl Dispatcher {
         &self.config
     }
 
+    pub fn config_mut(&mut self) -> &mut Config {
+        &mut self.config
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -170,6 +174,7 @@ impl Dispatcher {
                     redactor: &self.redactor,
                     passthrough_tokens: Some(self.config.output.passthrough_tokens),
                     min_gain_pct: Some(self.config.output.min_gain_pct),
+                    verbosity: Some(self.config.output.verbosity.clone()),
                 },
             )?
         };

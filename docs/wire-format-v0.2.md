@@ -35,6 +35,9 @@ no blank separator lines. Output is deterministic for fixed inputs and state.
 - Errors use `!code message. hint` and are followed by a newline.
 - `unchanged` and diff bases are emitted only after hash verification of the
   current scope.
+- Lean `verbosity=minimal` (default): on clean success, omit redundant boilerplate
+  and keep count-bearing summaries; failures/warnings preserve must-keep signals.
+  `edit` confirmations default to `edited <path> (+ins -del)`.
 
 ## Tokens and budgets
 
@@ -65,7 +68,8 @@ Selected with `--format json` (or `"format":"json"` in tool args).
 
 Top-level key order is stable. `meta.ok` is omitted (top-level `ok` is
 authoritative). Errors carry `{code, message, hint?}` and `ok=false`; the CLI
-exits nonzero for tool errors and for failed `run`/`check` exit statuses.
+exits nonzero for tool errors and for failed `check` exit statuses; for `run`/`sh`
+the CLI propagates the child exit code (timeout `124`).
 
 ## Examples
 
@@ -85,7 +89,7 @@ src/config.rs (5 lines, b3:8a581f63fd7b8007)
 2: pub fn parse_config(path: &str) -> Result<String, String> {
 
 # read (verified unchanged)
-unchanged src/config.rs (b3:8a581f63fd7b8007)
+unchanged src/config.rs (b3:8a581f63fd7b8007) expand ~1
 
 # read (external change)
 src/config.rs diff (b3:8a581f63fd7b8007)

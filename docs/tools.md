@@ -1,6 +1,6 @@
 # Tools
 
-All tools accept common `format`/`budget` arguments (CLI: `--format`, `--budget`).
+All tools accept common `format`/`budget` arguments (CLI: `--format`, `--budget`, `--verbosity minimal|normal|verbose`).
 JSON schemas are generated from the same argument structs and exposed over MCP
 `tools/list`; unknown fields are rejected.
 
@@ -23,21 +23,24 @@ JSON schemas are generated from the same argument structs and exposed over MCP
   Directories beyond depth or with >40 entries render `name/ (N)`; files beyond
   200 per directory become an elision handle.
 - `read`: `path`, optional `lines="A:B"` (1-based, clamped), `symbol`,
-  `outline=false`, `expect_hash`. Large files emit an outline plus head and an
-  elision handle for the remainder.
+  `outline=false`, `expect_hash`, `force=false`. Repeated unchanged reads return
+  `unchanged <path> (b3:...) expand ~h`; `force=true` re-emits content. Large
+  files emit an outline plus head and an elision handle for the remainder.
 - `search`: `pattern`, `mode="text"|"regex"|"symbol"`, `path="."` (or multiple paths), `paths`, `glob`, `context=0`,
-  `limit`. Returns ranked matches; CLI accepts multiple positional paths (e.g. `w search pat src tests`).
+  `limit`. Returns ranked matches; CLI accepts multiple positional paths (e.g.
+  `w search pat src tests`). Counts use singular/plural forms; a zero-result
+  search that skipped binary files notes `# skipped N binary file(s)`.
 - `expand`: `ref="~id"`, `grep`, `lines`, `head`, `tail`, `offset=0`.
 - `edit`: `path` plus exactly one operation: `find`+`replace` (unique literal
   match), `lines`+`content` (splice), `create=true`+`content`, `overwrite=true`
   + `content`, or `delete=true`. `expect_hash` rejects stale writes. Writes are
-  atomic; a post-write syntax check is advisory.
+  atomic; a post-write syntax check is advisory. Confirmation is compact by default (`output.edit_confirm`).
 - `run`: `argv=[...]` (no shell), `cwd="."`, `timeout_ms`, `stdin`, `env`
   (allowlisted keys only). Parsers consume injected/machine streams when used,
   while rendered tails/`raw_text`/`full` handles use user-relevant output with
   injected machine records stripped. Headers include parsed counts when known
   (e.g. passed/warnings/errors); failures preserve error/test signals and terminal
-  summaries with compact tails and a `full: ~id` handle as needed.
+  summaries with compact tails and a `full: ~id` handle as needed. In `minimal` on clean success, output is summary-only when sufficient.
 - `check`: `kind="all"|"build"|"lint"|"type"|"test"`, `path="."`. Runs detected
   project commands (Cargo, npm scripts, pytest, go, ruff, tsc, etc.) and
   reports count-bearing headers (`ok, N warnings, N passed` / errors/failures).
@@ -45,6 +48,9 @@ JSON schemas are generated from the same argument structs and exposed over MCP
   `push`) plus op fields: `pathspec`, `staged`, `context`, `limit`, `ref`,
   `path`, `lines`, `message`, `all`, `allow_empty`, `remote`, `branch`,
   `set_upstream`. `commit` requires `git_write`; `push` requires `git_write`.
+  `log` accepts `-n <count>`, `-n<count>`, `--limit <count>` and display-only
+  `--oneline`/`--graph`/`--decorate`/`--no-pager`; other short flags are
+  rejected with a hint.
 - `batch`: `calls=[{tool, args}]`. Calls run serially; each result is delimited
   (`#N tool ok|error`) and failures do not abort siblings. Nested `batch` is
   rejected.
@@ -62,3 +68,11 @@ Codes include `invalid_args`, `not_found`, `outside_workspace`,
 
 Each error message includes a concrete next action (for example a suggested
 `w read` range or `w edit` line splice).
+
+## Exit codes
+
+- `0`: success.
+- `1`: tool/domain failure (`check` errors, etc.).
+- `run`/`sh`: the child exit code when nonzero (timeout: `124`).
+- `2`: invocation/validation/policy/config error.
+- `70`: internal error.

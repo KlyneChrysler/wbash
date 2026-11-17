@@ -40,7 +40,7 @@ fuzz_target!(|data: &[u8]| {
                     budget,
                     format: fmt,
                     handles: &mut handles,
-                    redactor: &redactor, passthrough_tokens: None, min_gain_pct: None,
+                    redactor: &redactor, passthrough_tokens: None, min_gain_pct: None, verbosity: None,
                 },
             );
         }

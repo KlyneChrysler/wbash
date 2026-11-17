@@ -235,7 +235,10 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
             r.low(format!("-{rest}"));
         }
     }
-    r.header = format!("{files} files changed, +{plus} -{minus}");
+    r.header = format!(
+        "{} changed, +{plus} -{minus}",
+        crate::util::plural(files, "file")
+    );
     if out.truncated {
         r.note("output_truncated");
     }

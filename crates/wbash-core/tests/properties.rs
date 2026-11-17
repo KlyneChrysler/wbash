@@ -34,6 +34,7 @@ fn i1_must_keep_preserved_under_tight_budget() {
             redactor: &red,
             passthrough_tokens: None,
             min_gain_pct: None,
+            verbosity: None,
         },
     )
     .unwrap();
@@ -53,6 +54,7 @@ fn i1_must_keep_preserved_under_tight_budget() {
             redactor: &red,
             passthrough_tokens: None,
             min_gain_pct: None,
+            verbosity: None,
         },
     )
     .unwrap();
@@ -86,6 +88,7 @@ fn i2_lossless_elision_resolves() {
             redactor: &red,
             passthrough_tokens: None,
             min_gain_pct: None,
+            verbosity: None,
         },
     )
     .unwrap();
@@ -125,6 +128,7 @@ fn i3_determinism() {
                 redactor: &red,
                 passthrough_tokens: None,
                 min_gain_pct: None,
+                verbosity: None,
             },
         )
         .unwrap()
@@ -140,6 +144,7 @@ fn i3_determinism() {
                 redactor: &red,
                 passthrough_tokens: None,
                 min_gain_pct: None,
+                verbosity: None,
             },
         )
         .unwrap()

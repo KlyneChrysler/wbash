@@ -22,10 +22,12 @@ w --root . git status
 w --root . expand ~r1 --grep error
 ```
 
-- Global opts: `--root`, `--session`, `--format lean|json`, `--budget`, `--tier`, `--config`, `--no-project-config`
+- Global opts: `--root`, `--session`, `--format lean|json`, `--budget`, `--tier`, `--verbosity minimal|normal|verbose`, `--config`, `--no-project-config`
 - Tools: `tree`, `read`, `search`, `edit`, `run`, `check`, `git`, `expand`, `batch`, `sh`
 - `run`/`check`/`sh` require `--tier execute`; `sh` also requires `exec.allow_shell=true` in config
-- `git commit`/`push` require `--tier git_write`
+- `git commit`/`push` require `--tier git_write`; `git log -n 50` (or `--limit 50`) is accepted
+- `run`/`sh` exit with the child status (timeout `124`), so `w run cargo test` behaves like cargo in scripts
+- `read force=true` re-emits content instead of `unchanged`; unchanged reads include `expand ~h`
 
 ## Output model
 
@@ -46,7 +48,7 @@ Exposes the same tool set over MCP stdio (`tools/list`, `tools/call`).
 
 - User config: `$XDG_CONFIG_HOME/w-bash/config.toml` or `~/.config/w-bash/config.toml`
 - Cache/handles/index/ledger/stats: `$XDG_CACHE_HOME/w-bash/` or `~/.cache/w-bash/`
-- `[output] passthrough_tokens` / `min_gain_pct` control small-output passthrough behavior
+- `[output] verbosity` (`minimal` default), `edit_confirm`, `passthrough_tokens`, `min_gain_pct` control lean detail and small-output behavior
 - Env allowlist supports patterns (e.g. `CARGO_*`) with secret-key denial enforced
 
 ## Development

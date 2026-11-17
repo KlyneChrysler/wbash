@@ -454,15 +454,57 @@ fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> 
         parts.push("failed".to_string());
     }
     if errors > 0 {
-        parts.push(format!("{errors} errors"));
+        parts.push(count_label(errors, "error"));
     }
     if warnings > 0 {
-        parts.push(format!("{warnings} warnings"));
+        parts.push(count_label(warnings, "warning"));
     }
     if !parts.is_empty() {
         run.summary = Some(parts.join(", "));
     }
     Some(run)
+}
+
+fn count_label(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else if noun.ends_with("ch") || noun.ends_with('s') || noun.ends_with('x') {
+        format!("{n} {noun}es")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
+fn with_hints(message: String, hints: Vec<String>) -> String {
+    let mut out = message;
+    for h in hints.into_iter().take(2) {
+        let add = format!("; help: {h}");
+        if out.chars().count() + add.chars().count() > 300 {
+            break;
+        }
+        out.push_str(&add);
+    }
+    out
+}
+
+fn child_hints(msg: &Value) -> Vec<String> {
+    msg.get("children")
+        .and_then(Value::as_array)
+        .map(|children| {
+            children
+                .iter()
+                .filter(|c| {
+                    matches!(
+                        c.get("level").and_then(Value::as_str),
+                        Some("help") | Some("note")
+                    )
+                })
+                .filter_map(|c| c.get("message").and_then(Value::as_str))
+                .filter(|m| !m.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn cargo_diagnostic(msg: &Value) -> Option<Diagnostic> {
@@ -472,11 +514,13 @@ fn cargo_diagnostic(msg: &Value) -> Option<Diagnostic> {
         "warning" => Severity::Warn,
         _ => return None,
     };
-    let message = msg
-        .get("message")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    let message = with_hints(
+        msg.get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        child_hints(msg),
+    );
     let code = msg
         .get("code")
         .and_then(|c| c.get("code"))
@@ -584,11 +628,22 @@ fn parse_eslint(exit: &Exit, stdout: &str) -> Option<ParsedRun> {
                 col: m.get("column").and_then(Value::as_u64).map(|c| c as u32),
                 severity,
                 code: m.get("ruleId").and_then(Value::as_str).map(str::to_string),
-                message: m
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
+                message: with_hints(
+                    m.get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    m.get("suggestions")
+                        .and_then(Value::as_array)
+                        .map(|s| {
+                            s.iter()
+                                .filter_map(|x| x.get("desc").and_then(Value::as_str))
+                                .filter(|d| !d.is_empty())
+                                .map(str::to_string)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                ),
                 tool: Some("eslint".to_string()),
             });
         }
@@ -919,10 +974,10 @@ fn summarize_diagnostics(run: &mut ParsedRun) {
         .count();
     let mut parts = Vec::new();
     if errors > 0 {
-        parts.push(format!("{errors} errors"));
+        parts.push(count_label(errors, "error"));
     }
     if warnings > 0 {
-        parts.push(format!("{warnings} warnings"));
+        parts.push(count_label(warnings, "warning"));
     }
     if !parts.is_empty() {
         run.summary = Some(parts.join(", "));

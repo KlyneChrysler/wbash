@@ -398,11 +398,15 @@ pub fn read_text(abs: &Path) -> std::io::Result<TextFile> {
 }
 
 pub fn is_binary(bytes: &[u8]) -> bool {
-    let probe = &bytes[..bytes.len().min(8192)];
-    if probe.contains(&0) {
+    if bytes.contains(&0) {
         return true;
     }
-    std::str::from_utf8(probe).is_err()
+    match std::str::from_utf8(bytes) {
+        Ok(_) => false,
+        // `error_len() == None` means the input ended mid-code-point, which is
+        // still text (a truncated tail), not a binary file.
+        Err(e) => e.error_len().is_some(),
+    }
 }
 
 pub fn is_test_or_vendor(rel: &str) -> bool {
@@ -894,5 +898,37 @@ fn collect_errors(node: tree_sitter::Node<'_>, out: &mut Vec<SyntaxError>) {
         if child.has_error() || child.is_missing() {
             collect_errors(child, out);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_binary;
+
+    #[test]
+    fn multibyte_split_at_old_probe_boundary_is_text() {
+        let mut bytes = vec![b'a'; 8191];
+        bytes.extend_from_slice("\u{2014}".as_bytes());
+        assert!(!is_binary(&bytes));
+    }
+
+    #[test]
+    fn truncated_final_code_point_is_text() {
+        assert!(!is_binary(b"hello \xE2\x80"));
+    }
+
+    #[test]
+    fn invalid_utf8_is_binary() {
+        assert!(is_binary(b"hello \xFF world"));
+    }
+
+    #[test]
+    fn nul_bytes_are_binary() {
+        assert!(is_binary(b"hello\0world"));
+    }
+
+    #[test]
+    fn plain_text_is_not_binary() {
+        assert!(!is_binary("fn main() { println!(\"hi\"); }\n".as_bytes()));
     }
 }

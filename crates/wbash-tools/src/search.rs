@@ -123,6 +123,7 @@ impl Tool for SearchTool {
         let mut files_with_hits = 0usize;
         let mut fallback = false;
         let mut scanned_files = 0usize;
+        let mut skipped_binary = 0usize;
 
         let walk = ctx.workspace.walk_cached_arc();
         let filter = |rel: &str| {
@@ -137,6 +138,7 @@ impl Tool for SearchTool {
                 continue;
             };
             if text.binary {
+                skipped_binary += 1;
                 continue;
             }
             if a.mode == "symbol" {
@@ -233,9 +235,17 @@ impl Tool for SearchTool {
         let mut result = ToolResult::new(
             "search",
             if truncated {
-                format!("{files_with_hits} files, {total} matches ({returned} returned)")
+                format!(
+                    "{}, {} ({returned} returned)",
+                    util::plural(files_with_hits, "file"),
+                    util::plural(total, "match")
+                )
             } else {
-                format!("{files_with_hits} files, {total} matches")
+                format!(
+                    "{}, {}",
+                    util::plural(files_with_hits, "file"),
+                    util::plural(total, "match")
+                )
             },
         );
         if a.mode == "symbol" && fallback {
@@ -243,6 +253,12 @@ impl Tool for SearchTool {
         }
         if walk.truncated {
             result.note("search_truncated");
+        }
+        if total == 0 && skipped_binary > 0 {
+            result.note(format!(
+                "skipped {}",
+                util::plural(skipped_binary, "binary file")
+            ));
         }
 
         let mut context_lines: Vec<String> = Vec::new();

@@ -1,9 +1,9 @@
-# w bash — Implementation-Ready Specification (v3.1)
+# w bash — Implementation-Ready Specification (v3.2)
 
-**Status:** Implementation (v0.1 line, post-RC amendments)  
-**Version:** spec 3.1 / wire `lean@0.2` / config `schema_version=1`  
-**Date:** 2026-11-16  
-**Supersedes:** v3.0 RC
+**Status:** Implementation (v0.2.1 baseline, token-efficiency enhancements)  
+**Version:** spec 3.2 / wire `lean@0.2` (extended) / config `schema_version=1`  
+**Date:** 2026-11-17  
+**Supersedes:** v3.1
 
 This document is the normative source for v0.1 implementation, testing, packaging, and release gating.
 
@@ -176,7 +176,8 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 | Code | Meaning |
 |---:|---|
 | 0 | call succeeded (`meta.ok=true`) |
-| 1 | tool/domain failure or `meta.ok=false` (e.g. `run` nonzero exit, `check` with errors) — response still printed |
+| 1 | tool/domain failure or `meta.ok=false` (e.g. `check` with errors) — response still printed |
+| N | `run`/`sh` child exit code when nonzero (e.g. `101` for cargo); timeout maps to `124` |
 | 2 | invocation/validation/policy/config error (no tool execution) |
 | 70 | internal/unexpected error (`!internal`) |
 
@@ -187,7 +188,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - Exposes one MCP tool per `w bash` tool with identical names and parameter schemas.
 - Tool annotations: `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint=false` set accurately per §5 matrix.
 - `session_id` propagation: adapter MUST accept session from MCP metadata/argument convention supported by host; if absent use `default`. (Implementation MUST document exact field; RECOMMENDED: optional `_meta.session_id` or `session` param if host requires, but prefer adapter-level.)
-- Responses: `content` includes formatted lean text (or JSON text when `format=json`); `isError` true for invocation/policy/internal failures (CLI exit 2/70 equivalents). Tool-level failures with valid results (e.g. `exit 1`) SHOULD be `isError=false` with payload indicating failure, matching CLI exit 1 semantics.
+- Responses: `content` includes formatted lean text (or JSON text when `format=json`); `isError` true for invocation/policy/internal failures (CLI exit 2/70 equivalents). Tool-level failures with valid results (e.g. `exit 1`) SHOULD be `isError=false` with payload indicating failure. MCP does not propagate child exit codes; only the CLI does for `run`/`sh`.
 
 ### 4.3 Hook adapter (v0.1 optional, recommended)
 - Maps host read/search/exec/test built-ins to `read|search|run|check` where safe.
@@ -244,9 +245,9 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Errors:** `not_found`, `not_a_directory`, `outside_workspace`, `invalid_args`.
 
 ### 5.4 `read`
-- **Args:** `path` (req), `lines?`, `symbol?`, `outline=false`, `expect_hash?`, `budget?`.
+- **Args:** `path` (req), `lines?`, `symbol?`, `outline=false`, `expect_hash?`, `force=false`, `budget?`.
 - **Precedence:** `symbol` > `lines` > `outline` > default (ledger-aware full/summary).
-- **Default/ledger:** verify current bytes/hash; if matches `ReadSeen` for same scope → `unchanged <path> (b3:...)`. If changed and prior shown exists: emit compact diff (new-file line numbers, `@@` hunk headers allowed minimally) when `est(diff) < est(full)` and within budget, else selected full view. Always update ledger on success.
+- **Default/ledger:** verify current bytes/hash; if matches `ReadSeen` for same scope → `unchanged <path> (b3:...) expand ~h` (handle omitted only if unavailable). `force=true` bypasses the ledger short-circuit and diff view, re-emitting the selected content. If changed and prior shown exists: emit compact diff (new-file line numbers, `@@` hunk headers allowed minimally) when `est(diff) < est(full)` and within budget, else selected full view. Always update ledger on success.
 - **Rendering:** text as `<line>: <content>` (line 1-based). Binary: `binary <mime-or-kind> <bytes> bytes [sha256-prefix]` no body. Oversize/no scope: outline + head `read.head_lines` + `full: ~h`.
 - **Outline:** supported langs (Rust, TS/TSX, Python, Go) via tree-sitter signatures/types/doc-first-lines with indentation nesting; fallback heuristic labeled `# heuristic_outline`.
 - **Symbol:** extract definition/body range for named symbol; if not found `!symbol_not_found symbol '<n>' in <path>. try: w search pattern=<n> mode=symbol` (or outline).
@@ -256,7 +257,8 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Args:** `pattern` (req), `mode=text|regex|symbol` (default `text`), `path="."`, `glob?`, `context=0` (0–20), `limit=50` (≤`search.max_limit`), `budget?`.
 - **Engine:** ripgrep/`grep-*` crates; exact verification; ignore-aware. `symbol` uses index when available else text/def-heuristic fallback with `# symbol_index_unavailable fallback_scan`.
 - **Ranking (desc):** `is_definition` > `exact_case` > `ledger_proximity` > `recency_bucket` > `source_weight` (tests/vendor down-weighted unless in-scope/requested) > `match_quality`. Tie-break: `path,line,col`.
-- **Output:** header `<F> files, <M> matches` (and `(<R> returned)` if capped). Group by file; lines `path:line: snippet` or `path:l1,l2,...: snippet` per deterministic formatter rule. Context lines prefixed `path:line- snippet` (convention). Overflow `...+M more (~h)`.
+- **Output:** header `<F> file(s), <M> match(es)` with singular forms when counts are 1 (and `(<R> returned)` if capped). When no matches are found but binary files were skipped, add `# skipped <N> binary file(s)` so zero is not silently misleading. Group by file; lines `path:line: snippet` or `path:l1,l2,...: snippet` per deterministic formatter rule. Context lines prefixed `path:line- snippet` (convention). Overflow `...+M more (~h)`.
+- **Binary detection:** NUL bytes or invalid UTF-8 mark a file binary; an incomplete trailing multi-byte sequence is text.
 - **Errors:** `invalid_regex` (with engine message/position), `outside_workspace`, `not_found` (path), `invalid_args`. Index not ready → results + `# index_warming fallback_scan`.
 
 ### 5.6 `edit`
@@ -268,7 +270,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Matching/atomicity:** `find` is **byte-exact literal** against current file bytes (no regex, no fuzzy whitespace) and MUST match exactly once else `!ambiguous_anchor <n> matches in <path> at <locs...>. try: w read path=<p> lines=<s>:<e>` (up to 5 locs). `lines` replace clamps invalid bounds → `!invalid_range` or clamp note per case (v0.1: invalid range errors). Apply via temp file in same dir + fsync + atomic rename.
 - **Hash guard:** if `expect_hash` set and differs from current → `!hash_mismatch current=b3:...`.
 - **Post-check:** if `edit.post_check` enabled, run fast diagnostics for touched path/lang when available; append `; <E> errors, <W> warnings new` (must-keep if errors) or store detail in handle. Check failure/timeout → `# post_check_unavailable <reason>` (edit still reported applied).
-- **Output:** `created <path> (<bytes> bytes)` | `edited <path> (+ins -del) (b3:new)` | `deleted <path>` plus optional diag suffix.
+- **Output:** `created <path> (<bytes> bytes)` | `edited <path> (+ins -del)` (default compact; `output.edit_confirm=detailed` or verbose may include `(b3:new)`) | `deleted <path>` plus optional diag suffix.
 - **Errors:** `not_found`, `already_exists`, `ambiguous_anchor`, `hash_mismatch`, `invalid_range`, `outside_workspace`, `permission_denied`, `invalid_args`, `is_directory`.
 
 ### 5.7 `run`
@@ -276,7 +278,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Execution:** direct exec (no shell). Resolve `argv[0]` via PATH in exec env. `cwd` jailed. Child env is allowlisted (including toolchain-relevant vars/patterns such as `CARGO_*`/`CARGO_TARGET_DIR`, Go/Python/Node/Java/Maven/Gradle families as configured) with secret-key denial enforced.
 - **Capture/limits:** stream stdout/stderr to disk up to `exec.max_output_bytes`; keep bounded tail in memory; preserve order (PTY only if required, v0.1 default pipes). On timeout send TERM then KILL to process group; return partial handle.
 - **Parsing/raw separation:** parsers MAY inject semantics-preserving flags (e.g. cargo JSON). Parsing consumes the injected/machine stream; user-visible rendered output, `raw_text`, and stored `full` handles are derived from user-relevant output with injected machine records stripped when not required to preserve signals. Parse-miss/fallback must not dump injected machine-format noise.
-- **Output:** header `exit <code|timeout>[, <dur>][, <counts/summary>]` where parsed counts are known (e.g. passed/failed/errors/warnings). Failures preserve error/fail/test facts, error-tied context/frames when available, and terminal summaries; compaction is signal-first (on error paths warning-only bodies collapsed/counted). `full: ~h` provided when content is omitted/needed for lossless access.
+- **Output:** header `exit <code|timeout>[, <dur>][, <counts/summary>]` where parsed counts are known (e.g. passed/failed/errors/warnings). In `minimal` on clean success, prefer summary-only output (omit redundant bodies/boilerplate) while keeping counts/exit. Failures preserve error/fail/test facts, error-tied context/frames when available, and terminal summaries; compaction is signal-first (on error paths warning-only bodies collapsed/counted). `full: ~h` provided when content is omitted/needed for lossless access.
 - **Errors:** `exec_not_found`, `permission_denied`, `policy_denied`, `invalid_args`, `cwd_not_found`.
 
 ### 5.8 `check`
@@ -339,6 +341,7 @@ handle     := "~" [a-z0-9]{1,8}
 - **Records:** single space field separation; paths workspace-relative (`/`); prefer grouping to avoid path repetition.
 - **Indentation:** semantic only (tree depth, nested outline/code blocks in read).
 - **Errors/advisories:** may appear after header; must-keep errors MUST appear in body (not only in handle) unless identical and flood-grouped with explicit count + representative.
+- **Output verbosity (lean):** `minimal` (default) prioritizes token efficiency on success — emit count-bearing headers and omit redundant success boilerplate (repeated suite banners, non-essential hashes/metadata, low-signal bodies) when signals are preserved; `normal`/`verbose` include more detail. Failures/warnings MUST never be downgraded (I1/I2).
 - **Durations:** `run`/exec tools use `Nms` for <10000ms else `N.Ns`.
 - **Determinism:** stable ordering per tool; no locale formatting.
 
@@ -429,6 +432,7 @@ full: ~r7
 - **I5 Confinement:** path jail and tier/gate enforcement hold for all tools/args.
 - **I6 Schema budget:** exposed MCP schema ≤1500 tokens.
 - **I7 Handle integrity:** expand returns exact stored bytes (post-filter semantics defined).
+- **I8 Reference reuse:** when identical verified scope is re-requested in-session, prefer `unchanged`/handle reference over re-emitting full body (ledger-backed).
 
 ---
 
@@ -501,6 +505,8 @@ max_calls = 16
 [output]
 passthrough_tokens = 160           # small unstructured body threshold
 min_gain_pct = 15                  # require minimum token gain vs passthrough
+verbosity = "minimal"              # minimal|normal|verbose (lean output detail)
+edit_confirm = "compact"           # compact|detailed
 
 [index]
 enabled = true
@@ -585,8 +591,9 @@ bench/baselines/...
 
 ### 11.3 Benchmark harness
 - Tasks: fix failing test, locate regression cause, rename symbol, explain module, resolve lint/type errors, summarize git diff, etc. (≥30).
-- Runners: plain bash, (optional) compactor baseline, `w-bash` MCP/CLI.
+- Runners: plain bash, `w-bash` MCP/CLI, and (where supported) RTK/other baselines with **fair command mapping** per task/harness (no mismatched unsupported subcommands).
 - Metrics: success (pass criteria per task), turns, tool calls, input/output/total tokens, wall time, variance. Report deltas and gate pass/fail.
+- **Agentic E2E (required for “beats X” claims):** pinned model/agent harness, fixed task set, record turns/retries and model tokens incl. prompts/tool schemas where measurable; compare `w` vs baselines on the same protocol. Scripted CLI benchmarks are necessary but not sufficient for agentic token claims.
 
 ---
 

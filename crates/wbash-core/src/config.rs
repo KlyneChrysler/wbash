@@ -54,6 +54,8 @@ default_mod!(batch_defaults {
 default_mod!(output_defaults {
     passthrough_tokens: u32 = 160,
     min_gain_pct: u32 = 15,
+    verbosity: String = "minimal".to_string(),
+    edit_confirm: String = "compact".to_string(),
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +63,8 @@ default_mod!(output_defaults {
 pub struct OutputConfig {
     pub passthrough_tokens: u32,
     pub min_gain_pct: u32,
+    pub verbosity: String,
+    pub edit_confirm: String,
 }
 
 impl Default for OutputConfig {
@@ -68,6 +72,8 @@ impl Default for OutputConfig {
         Self {
             passthrough_tokens: output_defaults::passthrough_tokens(),
             min_gain_pct: output_defaults::min_gain_pct(),
+            verbosity: output_defaults::verbosity(),
+            edit_confirm: output_defaults::edit_confirm(),
         }
     }
 }
@@ -363,6 +369,21 @@ impl Config {
             return Err(WErr::new(
                 "invalid_config",
                 "read.max_full_lines must be >0",
+            ));
+        }
+        if !matches!(
+            self.output.verbosity.as_str(),
+            "minimal" | "normal" | "verbose"
+        ) {
+            return Err(WErr::new(
+                "invalid_config",
+                "output.verbosity must be minimal|normal|verbose",
+            ));
+        }
+        if !matches!(self.output.edit_confirm.as_str(), "compact" | "detailed") {
+            return Err(WErr::new(
+                "invalid_config",
+                "output.edit_confirm must be compact|detailed",
             ));
         }
         if self.telemetry.network {

@@ -112,6 +112,7 @@ impl Tool for BatchTool {
                             redactor: ctx.redactor,
                             passthrough_tokens: None,
                             min_gain_pct: None,
+                            verbosity: None,
                         },
                     )?;
                     for line in rendered.text.lines() {

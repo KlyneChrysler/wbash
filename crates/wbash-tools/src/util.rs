@@ -7,6 +7,17 @@ use wbash_core::error::{Result, WErr};
 use wbash_core::handles::HandleStore;
 use wbash_core::types::{Diagnostic, HandleRef, Item, ItemClass, Severity, TestResult, ToolResult};
 
+pub fn plural(n: usize, noun: &str) -> String {
+    if n == 1 {
+        return format!("1 {noun}");
+    }
+    if noun.ends_with('s') || noun.ends_with("ch") || noun.ends_with("sh") || noun.ends_with('x') {
+        format!("{n} {noun}es")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
 pub fn display_path(root: &Path, abs: &Path) -> String {
     if abs == root {
         ".".to_string()
