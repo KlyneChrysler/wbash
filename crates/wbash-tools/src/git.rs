@@ -10,6 +10,7 @@ use wbash_core::registry::{Tool, ToolContext};
 use wbash_core::types::{format_duration_ms, Tier, ToolResult};
 
 use crate::run::execute_with_parsers;
+use crate::util;
 
 pub struct GitTool;
 
@@ -164,7 +165,10 @@ fn status(ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
     }
     let mut r = ToolResult::new(
         "git",
-        format!("branch {branch_name}{tracking}, {} changed", entries.len()),
+        format!(
+            "branch {branch_name}{tracking}, {} changed",
+            util::plural(entries.len(), "file")
+        ),
     );
     for (code, path) in &entries {
         let class = if code.contains('U') || code == "AA" || code == "DD" {
@@ -215,29 +219,25 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     let mut files = 0usize;
     let mut plus = 0usize;
     let mut minus = 0usize;
-    let mut current = String::new();
-    let mut last_hunk: Option<String> = None;
     for line in out.stdout_str().lines() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
             let path = rest.rsplit(" b/").next().unwrap_or(rest).trim().to_string();
-            current = path;
             files += 1;
-            last_hunk = None;
+            r.high(format!("diff {path}"));
             continue;
         }
         if line.starts_with("@@") {
-            last_hunk = Some(line.to_string());
-            r.high(format!("{current} {line}"));
+            r.high(line.to_string());
         } else if line.starts_with("+++") || line.starts_with("---") {
             continue;
         } else if let Some(rest) = line.strip_prefix('+') {
             plus += 1;
-            let prefix = last_hunk.as_deref().map(|_| "").unwrap_or("");
-            let _ = prefix;
-            r.low(format!("{current} +{rest}"));
+            r.low(format!("+{rest}"));
         } else if let Some(rest) = line.strip_prefix('-') {
             minus += 1;
-            r.low(format!("{current} -{rest}"));
+            r.low(format!("-{rest}"));
+        } else if line.starts_with(' ') && ctx.config.output.verbosity == "verbose" {
+            r.low(line.to_string());
         }
     }
     r.header = format!(
@@ -273,9 +273,11 @@ fn log(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     }
     let stdout = out.stdout_str();
     let lines: Vec<&str> = stdout.lines().collect();
+    let raw_lines: Vec<String> = lines.iter().map(|l| l.replace('\t', " ")).collect();
     let mut r = ToolResult::new("git", format!("{} commits", lines.len()));
-    for line in &lines {
-        r.low(line.replace('\t', " "));
+    r.raw_text = Some(raw_lines.join("\n") + if raw_lines.is_empty() { "" } else { "\n" });
+    for line in raw_lines {
+        r.low(line);
     }
     r.meta.counts.insert("commits".into(), lines.len() as i64);
     Ok(r)
@@ -304,8 +306,10 @@ fn show(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     if !out.exit.is_success() {
         return Err(git_failure("show", &out));
     }
+    let stdout = out.stdout_str();
     let mut r = ToolResult::new("git", format!("show {reference}"));
-    for line in out.stdout_str().lines() {
+    r.raw_text = Some(stdout.to_string());
+    for line in stdout.lines() {
         if line.starts_with("diff --git") || line.starts_with("@@") {
             r.high(line.to_string());
         } else {

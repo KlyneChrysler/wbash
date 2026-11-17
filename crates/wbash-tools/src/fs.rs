@@ -186,7 +186,11 @@ fn render_tree(
     const INLINE_MAX: usize = 40;
     if files.len() > INLINE_MAX {
         let label = if sizes {
-            format!("{indent}({} files, {})", files.len(), human_size(files.iter().map(|(_, s)| *s).sum()))
+            format!(
+                "{indent}({} files, {})",
+                files.len(),
+                human_size(files.iter().map(|(_, s)| *s).sum())
+            )
         } else {
             format!("{indent}({} files)", files.len())
         };
@@ -201,7 +205,9 @@ fn render_tree(
                 }
             })
             .collect();
-        let h = ctx.handles.put("tree", lines.join("\n").as_bytes(), "text")?;
+        let h = ctx
+            .handles
+            .put("tree", lines.join("\n").as_bytes(), "text")?;
         result.must(format!("{indent}expand {}", h.id));
         result.handle(HandleRef {
             id: h.id.clone(),
@@ -402,16 +408,23 @@ impl Tool for ReadTool {
 
         if let Some(spec) = &a.lines {
             let (start, end) = parse_line_range(spec, line_count)?;
-            let mut r = ToolResult::new("read", format!("{display}:{start}-{end} ({short})"));
+            let count = end - start + 1;
+            let mut r = ToolResult::new(
+                "read",
+                format!("{display}:{start}-{end} ({count} lines, {short})"),
+            );
             if spec_mismatch(spec, start, end, line_count) {
                 r.note(format!("clamped {spec} -> {start}:{end}"));
             }
+            let mut raw = String::new();
             for i in start..=end {
-                r.low(format!("{i}: {}", lines[i - 1]));
+                let line = format!("{i}: {}", lines[i - 1]);
+                raw.push_str(&line);
+                raw.push('\n');
+                r.low(line);
             }
-            r.meta
-                .counts
-                .insert("lines".into(), (end - start + 1) as i64);
+            r.raw_text = Some(raw);
+            r.meta.counts.insert("lines".into(), count as i64);
             record_read(
                 ctx,
                 &display,
@@ -966,6 +979,8 @@ struct ExpandArgs {
     offset: u32,
     #[serde(default)]
     all: bool,
+    #[serde(default)]
+    depth: u32,
 }
 
 impl Tool for ExpandTool {
@@ -988,7 +1003,8 @@ impl Tool for ExpandTool {
                 "head": {"type": "integer"},
                 "tail": {"type": "integer"},
                 "offset": {"type": "integer"},
-                "all": {"type": "boolean"}
+                "all": {"type": "boolean"},
+                "depth": {"type": "integer"}
             },
             "required": ["ref"],
             "additionalProperties": false
@@ -1072,16 +1088,75 @@ impl Tool for ExpandTool {
                 format!("{id} {total} lines ({} bytes, {})", rec.bytes, rec.kind)
             },
         );
-        let body = selected.join("\n") + if selected.is_empty() { "" } else { "\n" };
-        if a.all {
-            r.raw_text = Some(body);
+        fn inline_nested(
+            text: &str,
+            ctx: &mut ToolContext<'_>,
+            depth: u32,
+            budget: &mut usize,
+        ) -> String {
+            if depth == 0 || *budget == 0 {
+                return text.to_string();
+            }
+            let re = regex::Regex::new(r"\(~([A-Za-z0-9]+)\)").ok();
+            let Some(re) = re else {
+                return text.to_string();
+            };
+            let mut out = String::with_capacity(text.len());
+            let mut last = 0usize;
+            for cap in re.captures_iter(text) {
+                let m = cap.get(0).unwrap();
+                let idm = cap.get(1).unwrap();
+                out.push_str(&text[last..m.start()]);
+                let id = format!("~{}", idm.as_str());
+                if *budget == 0 {
+                    out.push_str(m.as_str());
+                    last = m.end();
+                    continue;
+                }
+                if let Ok((b, rec)) = ctx.handles.get(&id) {
+                    if rec.content_type == "text" && b.len() <= 20000 && *budget >= b.len() {
+                        let inner = String::from_utf8_lossy(&b).into_owned();
+                        *budget = budget.saturating_sub(b.len());
+                        let inlined = inline_nested(&inner, ctx, depth - 1, budget);
+                        out.push_str("\n# inline ");
+                        out.push_str(&id);
+                        out.push('\n');
+                        out.push_str(inlined.trim_end());
+                        out.push('\n');
+                    } else {
+                        out.push_str(m.as_str());
+                    }
+                } else {
+                    out.push_str(m.as_str());
+                }
+                last = m.end();
+            }
+            out.push_str(&text[last..]);
+            out
         }
-        for line in &selected {
-            r.must(line.to_string());
+
+        let mut body = selected.join("\n") + if selected.is_empty() { "" } else { "\n" };
+        let max_depth = a.depth.min(2);
+        if a.all && max_depth > 0 {
+            let mut budget = 65536usize;
+            body = inline_nested(&body, ctx, max_depth, &mut budget);
+        }
+        if a.all {
+            r.raw_text = Some(body.clone());
+            for line in body.lines() {
+                r.must(line.to_string());
+            }
+        } else {
+            for line in &selected {
+                r.must(line.to_string());
+            }
         }
         let consumed = a.offset as usize + selected.len();
         if consumed < total && filtered && !a.all {
-            r.note(format!("remaining={} next_offset={consumed}", total - consumed));
+            r.note(format!(
+                "remaining={} next_offset={consumed}",
+                total - consumed
+            ));
         }
         r.meta.counts.insert("lines".into(), selected.len() as i64);
         r.meta.counts.insert("bytes".into(), rec.bytes as i64);

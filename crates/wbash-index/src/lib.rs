@@ -931,4 +931,33 @@ mod tests {
     fn plain_text_is_not_binary() {
         assert!(!is_binary("fn main() { println!(\"hi\"); }\n".as_bytes()));
     }
+
+    #[test]
+    fn crlf_text_is_not_binary() {
+        assert!(!is_binary(b"line1\r\nline2\r\n"));
+    }
+
+    #[test]
+    fn very_long_line_is_text() {
+        let line = "a".repeat(200_000);
+        assert!(!is_binary(line.as_bytes()));
+    }
+
+    #[test]
+    fn boundary_8191_8192_8193_with_multibyte() {
+        for n in [8191usize, 8192, 8193] {
+            let mut bytes = vec![b'x'; n.saturating_sub(1)];
+            bytes.extend_from_slice("\u{00E9}".as_bytes()); // 2-byte
+            assert!(!is_binary(&bytes), "size boundary around {n}");
+        }
+    }
+
+    #[test]
+    fn utf16_nul_and_invalid_utf8_sequences_are_binary() {
+        // UTF-16 LE BOM/text contains NUL bytes
+        assert!(is_binary(&[0xFF, 0xFE, 0x68, 0x00, 0x69, 0x00]));
+        // Invalid UTF-8 continuation/sequence (not a truncated tail)
+        assert!(is_binary(b"caf\xC3\x28"));
+        assert!(is_binary(b"\xE9mid"));
+    }
 }

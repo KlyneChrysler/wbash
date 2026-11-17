@@ -84,6 +84,10 @@ impl Tool for CheckTool {
         let mut tests: Vec<TestResult> = Vec::new();
         let mut all_ok = true;
         let mut ran = 0usize;
+        let mut passed = 0usize;
+        let mut failed = 0usize;
+        let mut ignored = 0usize;
+        let verbose = ctx.config.output.verbosity == "verbose";
         for (label, argv) in &commands {
             let run = match execute_with_parsers(
                 ctx,
@@ -112,28 +116,35 @@ impl Tool for CheckTool {
                 result.note(format!("timeout {label}"));
             }
             if let Some(p) = run.parsed {
-                all_ok &= p.diagnostics.iter().all(|d| d.severity != Severity::Error)
-                    && !p.tests.iter().any(|t| t.status.is_failure());
-                if let Some(summary) = &p.summary {
-                    if run.output.exit.is_success() {
-                        result.note(format!("{label}: {summary}"));
+                let (pp, pf, pi) = p.total_counts();
+                passed += pp;
+                failed += pf;
+                ignored += pi;
+                let has_errors = p.diagnostics.iter().any(|d| d.severity == Severity::Error);
+                all_ok &= run.output.exit.is_success() && !has_errors && pf == 0;
+                diagnostics.extend(p.diagnostics.clone());
+                tests.extend(p.tests.clone());
+                if run.output.exit.is_success() {
+                    if verbose {
+                        if let Some(summary) = p.summary.as_ref().filter(|s| !s.trim().is_empty()) {
+                            result.note(format!("{label}: {summary}"));
+                        } else {
+                            result.note(format!("{label}: ok"));
+                        }
                     }
-                } else if run.output.exit.is_success() && diagnostics.is_empty() && tests.is_empty()
-                {
+                } else {
+                    result.note(format!("{label} parse_miss raw_tail"));
+                    let raw = run.output.combined();
+                    util::compact_tail(&mut result, &raw, label, ctx.handles, true)?;
+                }
+            } else if run.output.exit.is_success() {
+                if verbose {
                     result.note(format!("{label}: ok"));
                 }
-                diagnostics.extend(p.diagnostics);
-                tests.extend(p.tests);
-            } else if !run.output.stdout.is_empty() || !run.output.stderr.is_empty() {
+            } else {
+                result.note(format!("{label} parse_miss raw_tail"));
                 let raw = run.output.combined();
-                if !run.output.exit.is_success() {
-                    result.note(format!("{label} parse_miss raw_tail"));
-                } else {
-                    result.note(format!("{label} parse_fallback"));
-                }
-                util::compact_tail(&mut result, &raw, "check", ctx.handles, true)?;
-            } else if run.output.exit.is_success() {
-                result.note(format!("{label}: ok"));
+                util::compact_tail(&mut result, &raw, label, ctx.handles, true)?;
             }
             if run.output.truncated {
                 result.note(format!("{label} output_truncated"));
@@ -155,7 +166,6 @@ impl Tool for CheckTool {
             .iter()
             .filter(|d| d.severity == Severity::Warn)
             .count();
-        let (passed, failed, _) = util::counts_of(&tests);
         let mut header = if errors == 0 && failed == 0 {
             if warnings == 0 {
                 "ok".to_string()
@@ -175,9 +185,13 @@ impl Tool for CheckTool {
         if passed > 0 {
             header.push_str(&format!(", {passed} passed"));
         }
+        if ignored > 0 {
+            header.push_str(&format!(", {ignored} ignored"));
+        }
         result.header = header;
         util::diagnostics_into(&mut result, diagnostics, ctx.root, ctx.handles)?;
         util::tests_into(&mut result, &tests, true);
+        result.meta.ok = all_ok && errors == 0 && failed == 0;
         result.meta.counts.insert("errors".into(), errors as i64);
         result
             .meta
@@ -189,7 +203,10 @@ impl Tool for CheckTool {
         if passed > 0 {
             result.meta.counts.insert("passed".into(), passed as i64);
         }
-        result.meta.ok = all_ok && errors == 0 && failed == 0;
+        if ignored > 0 {
+            result.meta.counts.insert("ignored".into(), ignored as i64);
+        }
+
         Ok(result)
     }
 }

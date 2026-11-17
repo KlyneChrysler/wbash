@@ -248,12 +248,18 @@ impl Tool for SearchTool {
                 )
             },
         );
-        if total == 1 && !truncated && !fallback && !walk.truncated && skipped_binary == 0 && a.context == 0 {
+        if total == 1
+            && !truncated
+            && !fallback
+            && !walk.truncated
+            && skipped_binary == 0
+            && a.context == 0
+        {
             if let Some(h) = hits.first() {
                 let line = format!("{}:{}: {}", h.path, h.line, h.snippet);
+                result.header = line.clone();
                 result.raw_text = Some(format!("{line}\n"));
                 result.items.clear();
-                result.must(line);
             }
         }
         if a.mode == "symbol" && fallback {
