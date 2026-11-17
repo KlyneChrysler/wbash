@@ -30,7 +30,7 @@ JSON schemas are generated from the same argument structs and exposed over MCP
   `limit`. Returns ranked matches; CLI accepts multiple positional paths (e.g.
   `w search pat src tests`). Counts use singular/plural forms; a zero-result
   search that skipped binary files notes `# skipped N binary file(s)`.
-- `expand`: `ref="~id"`, `grep`, `lines`, `head`, `tail`, `offset=0`.
+- `expand`: `ref="~id"`, `grep`, `lines`, `head`, `tail`, `offset=0`, `all=false`. `all=true` emits full selected content (no elision) to reduce multi-hop recovery.
 - `edit`: `path` plus exactly one operation: `find`+`replace` (unique literal
   match), `lines`+`content` (splice), `create=true`+`content`, `overwrite=true`
   + `content`, or `delete=true`. `expect_hash` rejects stale writes. Writes are

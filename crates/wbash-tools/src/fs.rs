@@ -183,32 +183,41 @@ fn render_tree(
     }
     let mut files = node.files.clone();
     files.sort();
-    const INLINE_MAX: usize = 200;
-    let (shown, rest) = if files.len() > INLINE_MAX {
-        files.split_at(INLINE_MAX)
-    } else {
-        (files.as_slice(), [].as_slice())
-    };
-    for (name, size) in shown {
-        let line = if sizes {
-            format!("{indent}{name} ({})", human_size(*size))
+    const INLINE_MAX: usize = 40;
+    if files.len() > INLINE_MAX {
+        let label = if sizes {
+            format!("{indent}({} files, {})", files.len(), human_size(files.iter().map(|(_, s)| *s).sum()))
         } else {
-            format!("{indent}{name}")
+            format!("{indent}({} files)", files.len())
         };
-        result.low(line);
-    }
-    if !rest.is_empty() {
-        let lines: Vec<String> = rest.iter().map(|(n, _)| format!("{indent}{n}")).collect();
-        let h = ctx
-            .handles
-            .put("tree", lines.join("\n").as_bytes(), "text")?;
-        result.must(format!("{indent}...+{} more ({})", rest.len(), h.id));
+        result.push(Item::new(ItemClass::High, 4.0, vec![label]));
+        let lines: Vec<String> = files
+            .iter()
+            .map(|(n, s)| {
+                if sizes {
+                    format!("{indent}{n} ({})", human_size(*s))
+                } else {
+                    format!("{indent}{n}")
+                }
+            })
+            .collect();
+        let h = ctx.handles.put("tree", lines.join("\n").as_bytes(), "text")?;
+        result.must(format!("{indent}expand {}", h.id));
         result.handle(HandleRef {
             id: h.id.clone(),
             kind: h.kind.clone(),
             bytes: h.bytes,
             hash: h.hash.clone(),
         });
+    } else {
+        for (name, size) in &files {
+            let line = if sizes {
+                format!("{indent}{name} ({})", human_size(*size))
+            } else {
+                format!("{indent}{name}")
+            };
+            result.low(line);
+        }
     }
     Ok(())
 }
@@ -458,10 +467,7 @@ impl Tool for ReadTool {
             if line_count <= max_full {
                 format!("{display} ({line_count} lines, {short})")
             } else {
-                format!(
-                    "{display} ({line_count} lines, showing {} + outline, {short})",
-                    ctx.config.read.head_lines
-                )
+                format!("{display} ({line_count} lines, head+outline, {short})")
             },
         );
 
@@ -958,6 +964,8 @@ struct ExpandArgs {
     tail: Option<u32>,
     #[serde(default)]
     offset: u32,
+    #[serde(default)]
+    all: bool,
 }
 
 impl Tool for ExpandTool {
@@ -977,9 +985,10 @@ impl Tool for ExpandTool {
                 "ref": {"type": "string"},
                 "grep": {"type": "string"},
                 "lines": {"type": "string"},
-                "head": {"type": "integer", "minimum": 1},
-                "tail": {"type": "integer", "minimum": 1},
-                "offset": {"type": "integer", "minimum": 0, "default": 0}
+                "head": {"type": "integer"},
+                "tail": {"type": "integer"},
+                "offset": {"type": "integer"},
+                "all": {"type": "boolean"}
             },
             "required": ["ref"],
             "additionalProperties": false
@@ -1063,12 +1072,16 @@ impl Tool for ExpandTool {
                 format!("{id} {total} lines ({} bytes, {})", rec.bytes, rec.kind)
             },
         );
+        let body = selected.join("\n") + if selected.is_empty() { "" } else { "\n" };
+        if a.all {
+            r.raw_text = Some(body);
+        }
         for line in &selected {
-            r.low(line.to_string());
+            r.must(line.to_string());
         }
         let consumed = a.offset as usize + selected.len();
-        if consumed < total && filtered {
-            r.must(format!("# more: offset={consumed}"));
+        if consumed < total && filtered && !a.all {
+            r.note(format!("remaining={} next_offset={consumed}", total - consumed));
         }
         r.meta.counts.insert("lines".into(), selected.len() as i64);
         r.meta.counts.insert("bytes".into(), rec.bytes as i64);

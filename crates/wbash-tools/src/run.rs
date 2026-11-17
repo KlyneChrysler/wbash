@@ -136,7 +136,7 @@ pub fn record_output(
     result.raw_text = Some(raw.clone());
     let mut full_ref: Option<String> = None;
     let has_structured_pre = if let Some(p) = parsed {
-        let (_, failed, _) = util::counts_of(&p.tests);
+        let (_, failed, _) = p.total_counts();
         let errors = p
             .diagnostics
             .iter()
@@ -177,7 +177,7 @@ pub fn record_output(
     }
 
     if let Some(p) = parsed {
-        let (passed, failed, _skipped) = util::counts_of(&p.tests);
+        let (passed, failed, ignored) = p.total_counts();
         let errors = p
             .diagnostics
             .iter()
@@ -215,6 +215,9 @@ pub fn record_output(
         if failed > 0 {
             result.meta.counts.insert("failed".into(), failed as i64);
         }
+        if ignored > 0 {
+            result.meta.counts.insert("ignored".into(), ignored as i64);
+        }
         if errors > 0 {
             result.meta.counts.insert("errors".into(), errors as i64);
         }
@@ -235,9 +238,14 @@ pub fn record_output(
                 result.must(format!("full: {}", h.id));
             }
         } else if !output.exit.is_success() && !parse_miss && !raw.trim().is_empty() {
-            // Avoid duplicating structured failure facts; add compact tail only when parsed output
-            // lacks concrete failure/error records (extra panics/hints/context).
-            if !(failed > 0 || errors > 0) {
+            // Avoid duplicating structured failure facts. When the runner only
+            // reported aggregate failures (for example cargo test -q), keep the
+            // failing test blocks instead of emitting the whole suite log.
+            if failed > 0 && p.tests.is_empty() {
+                if !util::compact_test_failures(result, &raw, label, ctx.handles)? {
+                    util::compact_tail(result, &raw, label, ctx.handles, false)?;
+                }
+            } else if failed == 0 && errors == 0 {
                 util::compact_tail(result, &raw, label, ctx.handles, false)?;
             }
         }
@@ -290,6 +298,17 @@ pub fn record_output(
         }
     }
 
+    // Structured diagnostics/tests are summarized, but every failing run keeps
+    // one full handle so callers can recover unexplored context.
+    if !output.exit.is_success() && !raw.trim().is_empty() && result.handles.is_empty() {
+        let h = ctx.handles.put(label, raw.as_bytes(), "text")?;
+        result.handle(HandleRef {
+            id: h.id.clone(),
+            kind: h.kind.clone(),
+            bytes: h.bytes,
+            hash: h.hash.clone(),
+        });
+    }
     let is_parse_miss = result.meta.notes.iter().any(|n| n.contains("parse_miss"));
     // Ensure lossless handle ref on failures/parse-miss tails even when compaction managed handle.
     let need_full_ref = !output.exit.is_success() || output.truncated || output.timed_out;
@@ -451,7 +470,7 @@ impl Tool for RunTool {
         };
         if run.output.exit.is_success() {
             if let Some(p) = run.parsed.as_ref() {
-                let (passed, _failed, _skipped) = util::counts_of(&p.tests);
+                let (passed, _failed, ignored) = p.total_counts();
                 let warnings = p
                     .diagnostics
                     .iter()
@@ -460,6 +479,9 @@ impl Tool for RunTool {
                 let summary_lc = p.summary.as_deref().unwrap_or("").to_ascii_lowercase();
                 if passed > 0 && !summary_lc.contains("passed") {
                     header.push_str(&format!(", {passed} passed"));
+                }
+                if ignored > 0 && !summary_lc.contains("ignored") {
+                    header.push_str(&format!(", {ignored} ignored"));
                 }
                 if warnings > 0 && !summary_lc.contains("warning") {
                     header.push_str(&format!(", {}", util::plural(warnings, "warning")));

@@ -216,23 +216,28 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     let mut plus = 0usize;
     let mut minus = 0usize;
     let mut current = String::new();
+    let mut last_hunk: Option<String> = None;
     for line in out.stdout_str().lines() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
             let path = rest.rsplit(" b/").next().unwrap_or(rest).trim().to_string();
             current = path;
             files += 1;
+            last_hunk = None;
             continue;
         }
         if line.starts_with("@@") {
+            last_hunk = Some(line.to_string());
             r.high(format!("{current} {line}"));
         } else if line.starts_with("+++") || line.starts_with("---") {
             continue;
         } else if let Some(rest) = line.strip_prefix('+') {
             plus += 1;
-            r.low(format!("+{rest}"));
+            let prefix = last_hunk.as_deref().map(|_| "").unwrap_or("");
+            let _ = prefix;
+            r.low(format!("{current} +{rest}"));
         } else if let Some(rest) = line.strip_prefix('-') {
             minus += 1;
-            r.low(format!("-{rest}"));
+            r.low(format!("{current} -{rest}"));
         }
     }
     r.header = format!(

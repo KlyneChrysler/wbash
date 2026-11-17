@@ -270,6 +270,68 @@ pub fn counts_of(tests: &[TestResult]) -> (usize, usize, usize) {
     (passed, failed, skipped)
 }
 
+/// Keep only libtest failure evidence: failing test blocks, the failures list,
+/// failed suite result lines, and the terminal cargo error. Passing suites,
+/// progress dots, and warning bodies are intentionally omitted.
+pub fn compact_test_failures(
+    result: &mut ToolResult,
+    raw: &str,
+    label: &str,
+    handles: &mut HandleStore,
+) -> Result<bool> {
+    let lines = no_ansi_lines(raw);
+    let mut selected: Vec<String> = Vec::new();
+    let mut in_block = false;
+    let mut in_failures = false;
+
+    for line in lines {
+        let t = line.trim();
+        if t.starts_with("test result:") {
+            if t.contains("FAILED") {
+                selected.push(line.clone());
+            }
+            in_block = false;
+            in_failures = false;
+            continue;
+        }
+        if t.starts_with("---- ") && t.ends_with(" stdout ----") {
+            in_block = true;
+            in_failures = false;
+            selected.push(line.clone());
+            continue;
+        }
+        if t == "failures:" {
+            in_block = false;
+            in_failures = true;
+            selected.push(line.clone());
+            continue;
+        }
+        if in_block || in_failures {
+            if t.is_empty() {
+                continue;
+            }
+            selected.push(line.clone());
+            continue;
+        }
+        if t.starts_with("error: test failed") {
+            selected.push(line);
+        }
+    }
+
+    if selected.is_empty() {
+        return Ok(false);
+    }
+    let h = handles.put(label, raw.as_bytes(), "text")?;
+    result.handle(HandleRef {
+        id: h.id.clone(),
+        kind: h.kind.clone(),
+        bytes: h.bytes,
+        hash: h.hash.clone(),
+    });
+    result.push(Item::new(ItemClass::MustKeep, 1000.0, selected));
+    Ok(true)
+}
+
 pub fn no_ansi_lines(text: &str) -> Vec<String> {
     strip_ansi(text)
         .lines()

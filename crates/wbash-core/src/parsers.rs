@@ -1,5 +1,13 @@
 use crate::types::{Diagnostic, Exit, TestResult};
 
+/// Aggregated test counts reported by a test runner summary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunCounts {
+    pub passed: usize,
+    pub failed: usize,
+    pub ignored: usize,
+}
+
 /// Result of normalizing a tool's captured output (spec §4.8).
 #[derive(Debug, Clone, Default)]
 pub struct ParsedRun {
@@ -7,6 +15,9 @@ pub struct ParsedRun {
     pub tests: Vec<TestResult>,
     pub diagnostics: Vec<Diagnostic>,
     pub parser: Option<String>,
+    /// Totals reported by runner summary lines. More authoritative than
+    /// `tests` when a runner omits per-test records (for example `cargo test -q`).
+    pub totals: Option<RunCounts>,
 }
 
 impl ParsedRun {
@@ -23,6 +34,14 @@ impl ParsedRun {
         let failed = self.tests.iter().filter(|t| t.status.is_failure()).count();
         let skipped = self.tests.len() - passed - failed;
         (passed, failed, skipped)
+    }
+
+    /// Summary totals when available, otherwise counts derived from per-test records.
+    pub fn total_counts(&self) -> (usize, usize, usize) {
+        match self.totals {
+            Some(t) => (t.passed, t.failed, t.ignored),
+            None => self.counts(),
+        }
     }
 }
 

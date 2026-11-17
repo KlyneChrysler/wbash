@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
 
-use wbash_core::parsers::{ParsedRun, ParserSet};
+use wbash_core::parsers::{ParsedRun, ParserSet, RunCounts};
 use wbash_core::types::{Diagnostic, Exit, Severity, TestResult, TestStatus};
 
 // ---------------------------------------------------------------------------
@@ -346,21 +346,24 @@ fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> 
         let re_result =
             Regex::new(r"^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored")
                 .ok();
+        let mut saw_result = false;
+        let mut summed = RunCounts::default();
         let mut panic_msg: Option<(String, String)> = None;
         let mut messages: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         for line in stdout.lines() {
             let t = line.trim();
             if let Some(caps) = re_result.as_ref().and_then(|re| re.captures(t)) {
-                passed = caps
+                saw_result = true;
+                summed.passed += caps
                     .get(1)
                     .and_then(|m| m.as_str().parse().ok())
                     .unwrap_or(0);
-                failed = caps
+                summed.failed += caps
                     .get(2)
                     .and_then(|m| m.as_str().parse().ok())
                     .unwrap_or(0);
-                ignored = caps
+                summed.ignored += caps
                     .get(3)
                     .and_then(|m| m.as_str().parse().ok())
                     .unwrap_or(0);
@@ -398,13 +401,6 @@ fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> 
                     "ignored" => TestStatus::Skip,
                     _ => TestStatus::Fail,
                 };
-                if status == TestStatus::Pass {
-                    passed += 1;
-                } else if status == TestStatus::Fail {
-                    failed += 1;
-                } else {
-                    ignored += 1;
-                }
                 run.tests.push(TestResult {
                     id: name,
                     status,
@@ -413,6 +409,16 @@ fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> 
                     location: None,
                 });
             }
+        }
+        if saw_result {
+            passed = summed.passed;
+            failed = summed.failed;
+            ignored = summed.ignored;
+        } else {
+            let (p, f, i) = run.counts();
+            passed = p;
+            failed = f;
+            ignored = i;
         }
         if let Some((name, msg)) = panic_msg {
             if !msg.is_empty() {
@@ -424,6 +430,14 @@ fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> 
                 t.message = Some(msg);
             }
         }
+    }
+
+    if !run.tests.is_empty() || passed > 0 || failed > 0 || ignored > 0 {
+        run.totals = Some(RunCounts {
+            passed,
+            failed,
+            ignored,
+        });
     }
 
     let errors = run
@@ -445,7 +459,7 @@ fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> 
             parts.push(format!("{failed} failed"));
         }
         if ignored > 0 {
-            parts.push(format!("{ignored} skipped"));
+            parts.push(format!("{ignored} ignored"));
         }
     } else if exit.is_success() {
         let sub = cargo_sub(argv).unwrap_or_else(|| "cargo".to_string());
