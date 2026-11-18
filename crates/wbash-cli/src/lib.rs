@@ -89,19 +89,29 @@ fn run_inner(argv: Vec<String>) -> Result<i32> {
         return Ok(0);
     };
 
-    if rest.iter().any(|a| a == "--help" || a == "-h") {
-        let registry = wbash_tools::registry();
-        if let Some(t) = registry.get(&tool) {
-            println!("w {}: {}", t.name(), t.description());
-            println!("tier: {}", t.min_tier());
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&t.schema()).unwrap_or_default()
-            );
+    let dd = rest.iter().position(|a| a == "--");
+    let help_idx = rest.iter().position(|a| a == "--help" || a == "-h");
+    if let Some(h) = help_idx {
+        let before_dd = dd.map(|d| h < d).unwrap_or(true);
+        let show_help = if matches!(tool.as_str(), "run" | "sh") {
+            before_dd && (h == 0 || rest.len() == 1)
+        } else {
+            before_dd
+        };
+        if show_help {
+            let registry = wbash_tools::registry();
+            if let Some(t) = registry.get(&tool) {
+                println!("w {}: {}", t.name(), t.description());
+                println!("tier: {}", t.min_tier());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&t.schema()).unwrap_or_default()
+                );
+                return Ok(0);
+            }
+            print_help();
             return Ok(0);
         }
-        print_help();
-        return Ok(0);
     }
 
     match tool.as_str() {
@@ -483,8 +493,8 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
                     && raw_key
                         .chars()
                         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-                if valid && !raw_key.starts_with('-') {
-                    let key = kebab_to_snake(raw_key);
+                let key = kebab_to_snake(raw_key);
+                if valid && !raw_key.starts_with('-') && is_known_arg_key(&key) {
                     insert_value(&mut obj, &key, parse_scalar_for(&key, raw_value));
                     i += 1;
                     continue;
@@ -508,6 +518,62 @@ fn parse_count(s: &str, flag: &str) -> Result<u32> {
         ));
     }
     Ok(n)
+}
+
+fn is_known_arg_key(key: &str) -> bool {
+    matches!(
+        key,
+        "all"
+            | "allow_empty"
+            | "argv"
+            | "branch"
+            | "budget"
+            | "calls_file"
+            | "content"
+            | "context"
+            | "create"
+            | "cwd"
+            | "delete"
+            | "depth"
+            | "dry_run"
+            | "end"
+            | "env"
+            | "expect_hash"
+            | "find"
+            | "force"
+            | "format"
+            | "glob"
+            | "head"
+            | "kind"
+            | "limit"
+            | "lines"
+            | "max_files"
+            | "message"
+            | "mode"
+            | "offset"
+            | "op"
+            | "outline"
+            | "overwrite"
+            | "path"
+            | "paths"
+            | "pathspec"
+            | "pattern"
+            | "ref"
+            | "reference"
+            | "regex"
+            | "remote"
+            | "replace"
+            | "set_upstream"
+            | "sizes"
+            | "staged"
+            | "start"
+            | "stdin"
+            | "symbol"
+            | "tail"
+            | "timeout_ms"
+            | "verbosity"
+            | "word"
+    )
 }
 
 fn parse_scalar_for(key: &str, s: &str) -> Value {
