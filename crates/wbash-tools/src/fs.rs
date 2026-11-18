@@ -963,7 +963,17 @@ impl Tool for EditTool {
         };
         util::atomic_write(&abs, &bytes)?;
         ctx.ledger.invalidate_path(&display);
-        ctx.workspace.invalidate();
+        if let Ok(meta) = std::fs::metadata(&abs) {
+            let m = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            ctx.workspace.invalidate_file(&display, meta.len(), m);
+        } else {
+            ctx.workspace.invalidate();
+        }
         let new_hex = hash::hash_bytes(new.as_bytes());
         let short = hash::short(&new_hex);
         let detailed = ctx.config.output.edit_confirm == "detailed";

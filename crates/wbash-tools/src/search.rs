@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -124,6 +127,8 @@ impl Tool for SearchTool {
         let mut fallback = false;
         let mut scanned_files = 0usize;
         let mut skipped_binary = 0usize;
+        let pat_lc = a.pattern.to_ascii_lowercase();
+        let pat_near = format!(" {pat_lc} ");
 
         let walk = ctx.workspace.walk_cached_arc();
         let filter = |rel: &str| {
@@ -134,22 +139,24 @@ impl Tool for SearchTool {
                 continue;
             }
             scanned_files += 1;
-            let Ok(text) = ctx.workspace.read_cached_text(f) else {
+            let Ok((text, binary)) = ctx.workspace.read_search_text(f) else {
                 continue;
             };
-            if text.binary {
+            if binary {
                 skipped_binary += 1;
                 continue;
             }
+            let path_lc = f.rel.to_ascii_lowercase();
             if a.mode == "symbol" {
-                let outline = ctx.symbols.symbols(&f.abs, &text.content);
+                let outline = ctx
+                    .symbols
+                    .symbols_cached(&f.abs, &text, f.mtime_ms, f.size);
                 if outline.heuristic {
                     fallback = true;
                 }
                 let before = hits.len();
                 for s in outline.symbols {
                     let name_lc = s.name.to_ascii_lowercase();
-                    let pat_lc = a.pattern.to_ascii_lowercase();
                     if s.name == a.pattern || name_lc.contains(&pat_lc) {
                         let mut score = 10;
                         if s.name == a.pattern {
@@ -157,21 +164,14 @@ impl Tool for SearchTool {
                         } else if name_lc == pat_lc {
                             score += 6;
                         }
-                        score += path_boost(&f.rel, &pat_lc);
+                        score += path_boost_lc(&path_lc, &pat_lc);
                         let line_text = s.line_text.trim();
                         let kind_lc = s.kind.to_ascii_lowercase();
-                        let snippet = if line_text
-                            .to_ascii_lowercase()
-                            .starts_with(&format!("{kind_lc} "))
-                            || line_text
-                                .to_ascii_lowercase()
-                                .starts_with(&format!("pub {kind_lc} "))
-                            || line_text
-                                .to_ascii_lowercase()
-                                .starts_with(&format!("export {kind_lc} "))
-                            || line_text
-                                .to_ascii_lowercase()
-                                .starts_with(&format!("async {kind_lc} "))
+                        let lt_lc = line_text.to_ascii_lowercase();
+                        let snippet = if lt_lc.starts_with(&format!("{kind_lc} "))
+                            || lt_lc.starts_with(&format!("pub {kind_lc} "))
+                            || lt_lc.starts_with(&format!("export {kind_lc} "))
+                            || lt_lc.starts_with(&format!("async {kind_lc} "))
                         {
                             line_text.to_string()
                         } else {
@@ -193,7 +193,7 @@ impl Tool for SearchTool {
                 continue;
             }
             let before = hits.len();
-            for (idx, line) in text.content.lines().enumerate() {
+            for (idx, line) in text.lines().enumerate() {
                 let matched = match &regex {
                     Some(re) => re.is_match(line),
                     None => line.contains(&a.pattern),
@@ -205,18 +205,17 @@ impl Tool for SearchTool {
                     };
                     let snippet = line.trim().chars().take(240).collect::<String>();
                     let is_definition = looks_like_definition(line);
-                    let pat_lc = a.pattern.to_ascii_lowercase();
                     let mut score = if is_definition { 8 } else { 3 };
                     if a.mode != "regex" {
                         let line_lc = line.to_ascii_lowercase();
-                        if line_lc.contains(&format!(" {pat_lc} "))
+                        if line_lc.contains(&pat_near)
                             || line_lc.starts_with(&pat_lc)
                             || line_lc.ends_with(&pat_lc)
                         {
                             score += 2;
                         }
                     }
-                    score += path_boost(&f.rel, &pat_lc);
+                    score += path_boost_lc(&path_lc, &pat_lc);
                     hits.push(Hit {
                         path: f.rel.clone(),
                         line: (idx + 1) as u32,
@@ -294,6 +293,7 @@ impl Tool for SearchTool {
             ));
         }
 
+        let mut context_cache: HashMap<String, Arc<str>> = HashMap::new();
         let mut context_lines: Vec<String> = Vec::new();
         // Group consecutive hits in same file with identical snippet as path:l1,l2
         let mut i = 0usize;
@@ -339,9 +339,13 @@ impl Tool for SearchTool {
                 vec![format!("{}: {}", loc, hit.snippet)],
             ));
             if a.context > 0 {
-                // read once per hit file not ideal but cheap; cache per path would be better
-                if let Ok(t) = wbash_index::read_text(&ctx.root.join(&hit.path)) {
-                    let all: Vec<&str> = t.content.lines().collect();
+                let text = context_cache.entry(hit.path.clone()).or_insert_with(|| {
+                    ctx.workspace
+                        .read_search_text_for_path(&hit.path)
+                        .unwrap_or_else(|_| Arc::from(""))
+                });
+                if !text.is_empty() {
+                    let all: Vec<&str> = text.lines().collect();
                     let lo = (hit.line as usize).saturating_sub(a.context as usize + 1);
                     let hi = ((hit.line as usize) + a.context as usize).min(all.len());
                     for (k, l) in all.iter().enumerate().take(hi).skip(lo) {
@@ -411,18 +415,17 @@ fn looks_like_definition(line: &str) -> bool {
     .any(|p| t.starts_with(p) || t.contains(&format!(" {p}")))
 }
 
-fn path_boost(rel: &str, pat_lc: &str) -> i32 {
-    let r = rel.to_ascii_lowercase();
+fn path_boost_lc(rel_lc: &str, pat_lc: &str) -> i32 {
     let mut b = 0;
-    if let Some(name) = r.rsplit('/').next() {
+    if let Some(name) = rel_lc.rsplit('/').next() {
         if name.contains(pat_lc) {
             b += 2;
         }
     }
-    if r.contains(pat_lc) {
+    if rel_lc.contains(pat_lc) {
         b += 1;
     }
-    if r.starts_with("src/") {
+    if rel_lc.starts_with("src/") {
         b += 1;
     }
     b

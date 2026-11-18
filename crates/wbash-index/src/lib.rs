@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use ignore::WalkBuilder;
 
@@ -55,13 +55,15 @@ struct DiskFile {
     text: Option<String>,
 }
 
+type ContentCache = HashMap<String, (u64, i64, Arc<str>)>;
+
 #[derive(Debug)]
 pub struct Workspace {
     root: PathBuf,
     max_entries: usize,
     cache_path: Option<PathBuf>,
     mem: Mutex<Option<std::sync::Arc<WalkResult>>>,
-    content: Mutex<HashMap<String, String>>,
+    content: Mutex<ContentCache>,
 }
 
 impl Workspace {
@@ -135,17 +137,18 @@ impl Workspace {
     }
 
     /// Return cached file text if available and current by mtime/size.
-    pub fn cached_text(&self, rel: &str, size: u64, mtime_ms: i64) -> Option<String> {
+    pub fn cached_text(&self, rel: &str, size: u64, mtime_ms: i64) -> Option<Arc<str>> {
         if let Ok(g) = self.content.lock() {
-            let key = format!("{rel}\0{size}\0{mtime_ms}");
-            if let Some(t) = g.get(&key) {
-                return Some(t.clone());
+            if let Some((sz, mt, t)) = g.get(rel) {
+                if *sz == size && *mt == mtime_ms {
+                    return Some(t.clone());
+                }
             }
         }
         None
     }
 
-    pub fn store_content(&self, rel: &str, size: u64, mtime_ms: i64, text: String) {
+    pub fn store_content(&self, rel: &str, size: u64, mtime_ms: i64, text: Arc<str>) {
         if text.len() > 512_000 {
             return;
         }
@@ -153,7 +156,7 @@ impl Workspace {
             if g.len() > 80_000 {
                 g.clear();
             }
-            g.insert(format!("{rel}\0{size}\0{mtime_ms}"), text);
+            g.insert(rel.to_string(), (size, mtime_ms, text));
         }
     }
 
@@ -161,7 +164,7 @@ impl Workspace {
     pub fn read_cached_text(&self, entry: &FileEntry) -> std::io::Result<TextFile> {
         if let Some(t) = self.cached_text(&entry.rel, entry.size, entry.mtime_ms) {
             return Ok(TextFile {
-                content: t,
+                content: t.to_string(),
                 binary: false,
                 size: entry.size,
                 encoding: Some(TextEncoding::Utf8),
@@ -169,9 +172,45 @@ impl Workspace {
         }
         let tf = read_text(&entry.abs)?;
         if !tf.binary {
-            self.store_content(&entry.rel, entry.size, entry.mtime_ms, tf.content.clone());
+            self.store_content(
+                &entry.rel,
+                entry.size,
+                entry.mtime_ms,
+                Arc::from(tf.content.as_str()),
+            );
         }
         Ok(tf)
+    }
+
+    /// Read text preferring cache, returning shared content for search/read-only use.
+    pub fn read_search_text(&self, entry: &FileEntry) -> std::io::Result<(Arc<str>, bool)> {
+        if let Some(t) = self.cached_text(&entry.rel, entry.size, entry.mtime_ms) {
+            return Ok((t, false));
+        }
+        let tf = read_text(&entry.abs)?;
+        if tf.binary {
+            return Ok((Arc::from(""), true));
+        }
+        let arc: Arc<str> = Arc::from(tf.content.as_str());
+        self.store_content(&entry.rel, entry.size, entry.mtime_ms, arc.clone());
+        Ok((arc, false))
+    }
+
+    pub fn read_search_text_for_path(&self, rel: &str) -> std::io::Result<Arc<str>> {
+        let walk = self.walk_cached_arc();
+        if let Some(entry) = walk.files.iter().find(|f| f.rel == rel) {
+            let (t, binary) = self.read_search_text(entry)?;
+            if binary {
+                return Ok(Arc::from(""));
+            }
+            return Ok(t);
+        }
+        let abs = self.root.join(rel);
+        let tf = read_text(&abs)?;
+        if tf.binary {
+            return Ok(Arc::from(""));
+        }
+        Ok(Arc::from(tf.content.as_str()))
     }
 
     fn scan(&self) -> WalkResult {
@@ -255,7 +294,7 @@ impl Workspace {
             .iter()
             .map(|f| {
                 let mut has = false;
-                if total < 48_000_000 {
+                if total < 48_000_000 && f.size <= 64_000 && !is_known_binary_ext(&f.rel) {
                     // read small text files for warm search cache (bounded)
                     if let Ok(tf) = read_text(&f.abs) {
                         if !tf.binary && tf.content.len() <= 64_000 {
@@ -265,8 +304,8 @@ impl Workspace {
                             total += b.len();
                             if let Ok(mut g) = self.content.lock() {
                                 g.insert(
-                                    format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms),
-                                    tf.content,
+                                    f.rel.clone(),
+                                    (f.size, f.mtime_ms, Arc::from(tf.content.as_str())),
                                 );
                             }
                             has = true;
@@ -345,10 +384,7 @@ impl Workspace {
                         break;
                     }
                     if let Ok(s) = std::str::from_utf8(&blob[off..off + len]) {
-                        g.insert(
-                            format!("{}\0{}\0{}", f.rel, f.size, f.mtime_ms),
-                            s.to_string(),
-                        );
+                        g.insert(f.rel.clone(), (f.size, f.mtime_ms, Arc::from(s)));
                     }
                     off += len;
                 }
@@ -358,6 +394,34 @@ impl Workspace {
             files,
             truncated: dc.truncated,
         })
+    }
+
+    /// Update a single file in cache after an in-place edit.
+    pub fn invalidate_file(&self, rel: &str, size: u64, mtime_ms: i64) {
+        if let Ok(mut g) = self.content.lock() {
+            g.remove(rel);
+        }
+        if let Ok(mut g) = self.mem.lock() {
+            if let Some(w) = g.as_mut() {
+                if let Some(walk) = Arc::get_mut(w) {
+                    if let Some(f) = walk.files.iter_mut().find(|f| f.rel == rel) {
+                        f.size = size;
+                        f.mtime_ms = mtime_ms;
+                    }
+                } else {
+                    let mut walk = (**w).clone();
+                    if let Some(f) = walk.files.iter_mut().find(|f| f.rel == rel) {
+                        f.size = size;
+                        f.mtime_ms = mtime_ms;
+                    }
+                    *w = Arc::new(walk);
+                }
+            }
+        }
+        if let Some(p) = &self.cache_path {
+            let _ = std::fs::remove_file(p);
+            let _ = std::fs::remove_file(p.with_extension("content"));
+        }
     }
 
     /// Invalidate in-memory and on-disk cache (e.g. after writes).
@@ -502,6 +566,56 @@ pub fn is_binary(bytes: &[u8]) -> bool {
     bytes.contains(&0)
 }
 
+pub fn is_known_binary_ext(rel: &str) -> bool {
+    let ext = rel.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "bmp"
+            | "ico"
+            | "webp"
+            | "pdf"
+            | "zip"
+            | "gz"
+            | "xz"
+            | "bz2"
+            | "7z"
+            | "tar"
+            | "tgz"
+            | "jar"
+            | "class"
+            | "exe"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "o"
+            | "a"
+            | "wasm"
+            | "bin"
+            | "dat"
+            | "db"
+            | "sqlite"
+            | "sqlite3"
+            | "mp3"
+            | "mp4"
+            | "mov"
+            | "avi"
+            | "mkv"
+            | "ogg"
+            | "wav"
+            | "flac"
+            | "ttf"
+            | "otf"
+            | "woff"
+            | "woff2"
+            | "eot"
+            | "icns"
+    )
+}
+
 pub fn is_test_or_vendor(rel: &str) -> bool {
     let lower = rel.to_ascii_lowercase();
     lower.contains("/test")
@@ -580,13 +694,6 @@ impl SymbolIndex {
     }
 
     pub fn symbols(&self, path: &Path, source: &str) -> Outline {
-        let lang = Lang::from_path(path);
-        if lang == Lang::Unknown {
-            return Outline {
-                symbols: heuristic_outline(source),
-                heuristic: true,
-            };
-        }
         if let Ok(meta) = std::fs::metadata(path) {
             let mtime = meta
                 .modified()
@@ -594,28 +701,36 @@ impl SymbolIndex {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
-            let key = (path.to_path_buf(), mtime, meta.len());
-            if let Ok(guard) = self.cache.lock() {
-                if let Some(syms) = guard.get(&key) {
-                    return Outline {
-                        symbols: syms.clone(),
-                        heuristic: false,
-                    };
-                }
-            }
-            let syms = ts_outline(lang, source);
-            if let Ok(mut guard) = self.cache.lock() {
-                guard.insert(key, syms.clone());
-            }
-            Outline {
-                symbols: syms,
-                heuristic: false,
-            }
+            self.symbols_cached(path, source, mtime, meta.len())
         } else {
-            Outline {
-                symbols: ts_outline(lang, source),
-                heuristic: false,
+            self.symbols_cached(path, source, 0, 0)
+        }
+    }
+
+    pub fn symbols_cached(&self, path: &Path, source: &str, mtime_ms: i64, size: u64) -> Outline {
+        let lang = Lang::from_path(path);
+        if lang == Lang::Unknown {
+            return Outline {
+                symbols: heuristic_outline(source),
+                heuristic: true,
+            };
+        }
+        let key = (path.to_path_buf(), mtime_ms, size);
+        if let Ok(guard) = self.cache.lock() {
+            if let Some(syms) = guard.get(&key) {
+                return Outline {
+                    symbols: syms.clone(),
+                    heuristic: false,
+                };
             }
+        }
+        let syms = ts_outline(lang, source);
+        if let Ok(mut guard) = self.cache.lock() {
+            guard.insert(key, syms.clone());
+        }
+        Outline {
+            symbols: syms,
+            heuristic: false,
         }
     }
 
