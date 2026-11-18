@@ -1,0 +1,16 @@
+id: agent_read_edit_verify
+kind: agent
+fixture: calc
+setup:
+  - "cargo test -q >/tmp/wbench_pre.txt 2>&1 || true"
+expect:
+  - "test result: ok"
+check: "cargo test -q"
+bash:
+  - "cat src/lib.rs"
+  - "sed -i '' 's/a - b/a + b/' src/lib.rs"
+  - "cargo test -q"
+w:
+  - "w read src/lib.rs"
+  - "w replace 'a - b' 'a + b' src/lib.rs"
+  - "w --tier execute run -- cargo test -q"

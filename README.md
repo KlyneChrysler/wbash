@@ -25,6 +25,7 @@ w tree src --depth 2
 w search "pattern" src
 w read src/lib.rs --lines 1:60
 w edit src/lib.rs --find 'old' --replace 'new'
+w replace old new src
 w --tier execute run -- cargo test -q
 w --tier execute check --kind all
 w git status
