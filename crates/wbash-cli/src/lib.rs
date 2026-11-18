@@ -74,11 +74,16 @@ fn run_inner(argv: Vec<String>) -> Result<i32> {
         print_help();
         return Ok(0);
     }
-    if argv.iter().any(|a| a == "--version" || a == "-V") {
+    if argv.first().map(String::as_str) == Some("--version")
+        || argv.first().map(String::as_str) == Some("-V")
+    {
         println!("w {}", env!("CARGO_PKG_VERSION"));
         return Ok(0);
     }
-    if argv[0] == "-h" || argv[0] == "--help" || argv[0] == "help" {
+    if matches!(
+        argv.first().map(String::as_str),
+        Some("-h" | "--help" | "help")
+    ) {
         print_help();
         return Ok(0);
     }
@@ -885,16 +890,20 @@ fn since_ms(spec: &str) -> Option<i64> {
     let now = wbash_core::types::now_ms();
     let s = spec.trim();
     if let Some(days) = s.strip_suffix('d').and_then(|n| n.parse::<i64>().ok()) {
-        return Some(now - days * 86_400_000);
+        return days
+            .checked_mul(86_400_000)
+            .and_then(|ms| now.checked_sub(ms));
     }
     if let Some(hours) = s.strip_suffix('h').and_then(|n| n.parse::<i64>().ok()) {
-        return Some(now - hours * 3_600_000);
+        return hours
+            .checked_mul(3_600_000)
+            .and_then(|ms| now.checked_sub(ms));
     }
     if let Some(mins) = s.strip_suffix('m').and_then(|n| n.parse::<i64>().ok()) {
-        return Some(now - mins * 60_000);
+        return mins.checked_mul(60_000).and_then(|ms| now.checked_sub(ms));
     }
     if let Some(days) = days_from_ymd(s) {
-        return Some(days * 86_400_000);
+        return days.checked_mul(86_400_000);
     }
     None
 }
@@ -904,13 +913,30 @@ fn days_from_ymd(s: &str) -> Option<i64> {
     let y: i64 = parts.next()?.parse().ok()?;
     let m: i64 = parts.next()?.parse().ok()?;
     let d: i64 = parts.next()?.parse().ok()?;
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = if m > 2 { m - 3 } else { m + 9 };
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    Some(era * 146_097 + doe - 719_468)
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let y_adj = if m <= 2 { y.checked_sub(1)? } else { y };
+    let era = y_adj.div_euclid(400);
+    let yoe = y_adj.checked_sub(era.checked_mul(400)?)?;
+    let mp = if m > 2 {
+        m.checked_sub(3)?
+    } else {
+        m.checked_add(9)?
+    };
+    let doy = 153_i64
+        .checked_mul(mp)?
+        .checked_add(2)?
+        .checked_div(5)?
+        .checked_add(d.checked_sub(1)?)?;
+    let doe = yoe
+        .checked_mul(365)?
+        .checked_add(yoe.div_euclid(4))?
+        .checked_sub(yoe.div_euclid(100))?
+        .checked_add(doy)?;
+    era.checked_mul(146_097)?
+        .checked_add(doe)?
+        .checked_sub(719_468)
 }
 
 fn cmd_gain(tokens: &[String]) -> Result<i32> {
