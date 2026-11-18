@@ -289,11 +289,13 @@ def main() -> int:
         base = json.loads(Path(args.baseline).read_text())
         base_w = base.get("summary", {}).get("w", {})
         cur_w = summary.get("w", {})
-        base_total = base_w.get("tokens_cl100k")
-        cur_total = cur_w.get("tokens_cl100k")
+        use_cl100k = base.get("tokenizer") == "cl100k_base" and payload.get("tokenizer") == "cl100k_base"
+        metric = "tokens_cl100k" if use_cl100k else "tokens_est"
+        base_total = base_w.get(metric)
+        cur_total = cur_w.get(metric)
         if base_total and cur_total:
             delta = 100.0 * (cur_total - base_total) / base_total
-            print(f"  baseline regression w cl100k: {delta:+.1f}% (max {args.max_regress_pct:+.1f}%)")
+            print(f"  baseline regression w {metric}: {delta:+.1f}% (max {args.max_regress_pct:+.1f}%)")
             if delta > args.max_regress_pct:
                 print("  FAIL: token regression above threshold", file=sys.stderr)
                 return 1
@@ -304,8 +306,8 @@ def main() -> int:
             b = base_by_id.get(r["task"])
             if not b:
                 continue
-            bt = b.get("tokens_cl100k") or b.get("tokens_est") or 0
-            ct = r.get("tokens_cl100k") or r.get("tokens_est") or 0
+            bt = b.get(metric) or 0
+            ct = r.get(metric) or 0
             if bt > 0:
                 d = 100.0 * (ct - bt) / bt
                 if d > args.max_regress_pct:
