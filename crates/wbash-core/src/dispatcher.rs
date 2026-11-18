@@ -249,13 +249,33 @@ impl Dispatcher {
                 return;
             }
         }
-        if let Ok(text) = serde_json::to_vec(ledger) {
-            let _ = std::fs::write(&path, text);
+        let Ok(text) = serde_json::to_vec(ledger) else {
+            return;
+        };
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
+        let write = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
             }
+            f.write_all(&text)?;
+            f.sync_all()?;
+            Ok(())
+        };
+        if write().is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        } else {
+            let _ = std::fs::remove_file(&tmp);
         }
     }
 

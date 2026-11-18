@@ -79,8 +79,16 @@ pub fn parse_args<T: DeserializeOwned>(args: Value, tool: &str, hint: &str) -> R
 }
 
 /// Parse a `start:end` 1-based inclusive range. Either side may be omitted.
-/// Returns 1-based inclusive bounds clamped to `len`.
 pub fn parse_line_range(spec: &str, len: usize) -> Result<(usize, usize)> {
+    parse_line_range_inner(spec, len, false)
+}
+
+/// Parse a `start:end` 1-based inclusive range, clamping to file length.
+pub fn parse_line_range_clamped(spec: &str, len: usize) -> Result<(usize, usize)> {
+    parse_line_range_inner(spec, len, true)
+}
+
+fn parse_line_range_inner(spec: &str, len: usize, clamp: bool) -> Result<(usize, usize)> {
     let (a, b) = spec.split_once(':').ok_or_else(|| {
         WErr::invalid_args(
             format!("bad lines range '{spec}'"),
@@ -104,7 +112,21 @@ pub fn parse_line_range(spec: &str, len: usize) -> Result<(usize, usize)> {
             WErr::invalid_args(format!("bad end in lines='{spec}'"), "use lines=10:40")
         })?
     };
-    if start == 0 || end == 0 || start > end {
+    if start == 0 || end == 0 {
+        return Err(WErr::new(
+            "invalid_range",
+            format!("lines='{spec}' is not a valid 1-based inclusive range"),
+        ));
+    }
+    if clamp {
+        let mut s = start.min(len);
+        let mut e = end.min(len);
+        if s > e {
+            std::mem::swap(&mut s, &mut e);
+        }
+        return Ok((s, e));
+    }
+    if start > end {
         return Err(WErr::new(
             "invalid_range",
             format!("lines='{spec}' is not a valid 1-based inclusive range"),

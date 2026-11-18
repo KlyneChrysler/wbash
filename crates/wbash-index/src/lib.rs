@@ -170,6 +170,7 @@ impl Workspace {
                 content: t,
                 binary: false,
                 size,
+                encoding: Some(TextEncoding::Utf8),
             });
         }
         let tf = read_text(&entry.abs)?;
@@ -388,11 +389,26 @@ fn mtime_ms(meta: &std::fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextEncoding {
+    Utf8,
+    Utf16Le,
+    Utf16Be,
+    Latin1,
+}
+
 #[derive(Debug, Clone)]
 pub struct TextFile {
     pub content: String,
     pub binary: bool,
     pub size: u64,
+    pub encoding: Option<TextEncoding>,
+}
+
+impl TextFile {
+    pub fn is_utf8(&self) -> bool {
+        matches!(self.encoding, Some(TextEncoding::Utf8))
+    }
 }
 
 pub fn read_text(abs: &Path) -> std::io::Result<TextFile> {
@@ -407,6 +423,7 @@ pub fn read_text(abs: &Path) -> std::io::Result<TextFile> {
             content: String::from_utf16_lossy(&units),
             binary: false,
             size,
+            encoding: Some(TextEncoding::Utf16Le),
         });
     }
     if bytes.starts_with(&[0xFE, 0xFF]) {
@@ -418,6 +435,7 @@ pub fn read_text(abs: &Path) -> std::io::Result<TextFile> {
             content: String::from_utf16_lossy(&units),
             binary: false,
             size,
+            encoding: Some(TextEncoding::Utf16Be),
         });
     }
     if bytes.contains(&0) {
@@ -425,6 +443,7 @@ pub fn read_text(abs: &Path) -> std::io::Result<TextFile> {
             content: String::from_utf8_lossy(&bytes).into_owned(),
             binary: true,
             size,
+            encoding: None,
         });
     }
     if let Ok(s) = std::str::from_utf8(&bytes) {
@@ -432,25 +451,57 @@ pub fn read_text(abs: &Path) -> std::io::Result<TextFile> {
             content: s.to_string(),
             binary: false,
             size,
+            encoding: Some(TextEncoding::Utf8),
         });
     }
-    // treat invalid UTF-8 without NULs as text (e.g. Latin-1)
     let content: String = bytes.iter().map(|&b| b as char).collect();
     Ok(TextFile {
         content,
         binary: false,
         size,
+        encoding: Some(TextEncoding::Latin1),
     })
+}
+
+pub fn encode_text(text: &str, encoding: TextEncoding) -> std::io::Result<Vec<u8>> {
+    match encoding {
+        TextEncoding::Utf8 => Ok(text.as_bytes().to_vec()),
+        TextEncoding::Utf16Le => {
+            let mut out = vec![0xFF, 0xFE];
+            for u in text.encode_utf16() {
+                out.extend_from_slice(&u.to_le_bytes());
+            }
+            Ok(out)
+        }
+        TextEncoding::Utf16Be => {
+            let mut out = vec![0xFE, 0xFF];
+            for u in text.encode_utf16() {
+                out.extend_from_slice(&u.to_be_bytes());
+            }
+            Ok(out)
+        }
+        TextEncoding::Latin1 => {
+            let mut out = Vec::with_capacity(text.len());
+            for ch in text.chars() {
+                let cp = ch as u32;
+                if cp > 0xFF {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("character U+{cp:04X} cannot be encoded as Latin-1"),
+                    ));
+                }
+                out.push(cp as u8);
+            }
+            Ok(out)
+        }
+    }
 }
 
 pub fn is_binary(bytes: &[u8]) -> bool {
     if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
         return false;
     }
-    if bytes.contains(&0) {
-        return true;
-    }
-    false
+    bytes.contains(&0)
 }
 
 pub fn is_test_or_vendor(rel: &str) -> bool {

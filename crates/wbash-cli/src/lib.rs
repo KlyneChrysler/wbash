@@ -115,6 +115,13 @@ fn run_inner(argv: Vec<String>) -> Result<i32> {
     }
 
     let (mut obj, positionals, after_dd) = parse_tool_args(&rest, &tool)?;
+    let merged_pos = if matches!(tool.as_str(), "run" | "sh") {
+        positionals.clone()
+    } else {
+        let mut p = positionals.clone();
+        p.extend(after_dd.clone());
+        p
+    };
     if tool == "run" || tool == "sh" {
         if tool == "run" {
             let argv_pos: Vec<String> = positionals.clone();
@@ -129,27 +136,23 @@ fn run_inner(argv: Vec<String>) -> Result<i32> {
                     Value::Array(argv.into_iter().map(Value::String).collect()),
                 );
             }
-        } else if let Some(cmd) = positionals.first() {
+        } else if let Some(cmd) = merged_pos.first() {
             obj.insert("command".into(), Value::String(cmd.clone()));
         }
     } else if tool == "git" {
-        build_git_args(&mut obj, &positionals)?;
+        build_git_args(&mut obj, &merged_pos)?;
     } else if tool == "search" {
-        if !positionals.is_empty() {
-            obj.insert("pattern".into(), Value::String(positionals[0].clone()));
+        if !merged_pos.is_empty() {
+            obj.insert("pattern".into(), Value::String(merged_pos[0].clone()));
         }
-        if positionals.len() == 2 {
-            obj.insert("path".into(), Value::String(positionals[1].clone()));
-        } else if positionals.len() > 2 {
-            let paths: Vec<Value> = positionals[1..]
-                .iter()
-                .cloned()
-                .map(Value::String)
-                .collect();
+        if merged_pos.len() == 2 {
+            obj.insert("path".into(), Value::String(merged_pos[1].clone()));
+        } else if merged_pos.len() > 2 {
+            let paths: Vec<Value> = merged_pos[1..].iter().cloned().map(Value::String).collect();
             obj.insert("paths".into(), Value::Array(paths));
         }
     } else {
-        fill_positionals(&tool, &mut obj, &positionals)?;
+        fill_positionals(&tool, &mut obj, &merged_pos)?;
     }
 
     if let Some(format) = &global.format {
@@ -286,7 +289,7 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
             after_dd.extend(tokens[i + 1..].iter().cloned());
             break;
         }
-        if tok == "-m" {
+        if tok == "-m" && tool == "git" {
             i += 1;
             if i >= tokens.len() {
                 return Err(WErr::invalid_args(
@@ -347,7 +350,7 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
             }
             let is_bool = BOOLEANS.contains(&raw_key);
             let value = match inline {
-                Some(v) => parse_scalar(&v),
+                Some(v) => parse_scalar_for(&key, &v),
                 None if is_bool => {
                     if i + 1 < tokens.len() && (tokens[i + 1] == "true" || tokens[i + 1] == "false")
                     {
@@ -365,7 +368,7 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
                             format!("--{raw_key} <value>"),
                         ));
                     }
-                    parse_scalar(&tokens[i])
+                    parse_scalar_for(&key, &tokens[i])
                 }
             };
             insert_value(&mut obj, &key, value);
@@ -380,7 +383,7 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
                         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
                 if valid && !raw_key.starts_with('-') {
                     let key = kebab_to_snake(raw_key);
-                    insert_value(&mut obj, &key, parse_scalar(raw_value));
+                    insert_value(&mut obj, &key, parse_scalar_for(&key, raw_value));
                     i += 1;
                     continue;
                 }
@@ -405,19 +408,49 @@ fn parse_count(s: &str, flag: &str) -> Result<u32> {
     Ok(n)
 }
 
-fn parse_scalar(s: &str) -> Value {
-    if s == "true" {
-        return Value::Bool(true);
+fn parse_scalar_for(key: &str, s: &str) -> Value {
+    let numeric = matches!(
+        key,
+        "depth"
+            | "limit"
+            | "context"
+            | "offset"
+            | "head"
+            | "tail"
+            | "timeout_ms"
+            | "budget"
+            | "start"
+            | "end"
+    );
+    let structured = matches!(key, "paths" | "pathspec" | "calls" | "argv");
+    if numeric {
+        if let Ok(n) = s.parse::<i64>() {
+            return Value::Number(n.into());
+        }
     }
-    if s == "false" {
-        return Value::Bool(false);
-    }
-    if let Ok(n) = s.parse::<i64>() {
-        return Value::Number(n.into());
-    }
-    if (s.starts_with('[') && s.ends_with(']')) || (s.starts_with('{') && s.ends_with('}')) {
+    if structured || s.starts_with('[') || s.starts_with('{') {
         if let Ok(v) = serde_json::from_str::<Value>(s) {
             return v;
+        }
+    }
+    if matches!(
+        key,
+        "all"
+            | "staged"
+            | "force"
+            | "outline"
+            | "sizes"
+            | "delete"
+            | "create"
+            | "overwrite"
+            | "set_upstream"
+            | "allow_empty"
+    ) {
+        if s == "true" {
+            return Value::Bool(true);
+        }
+        if s == "false" {
+            return Value::Bool(false);
         }
     }
     Value::String(s.to_string())
@@ -497,8 +530,24 @@ fn build_git_args(obj: &mut Map<String, Value>, pos: &[String]) -> Result<()> {
     obj.insert("op".into(), Value::String(op.clone()));
     let rest = &pos[1.min(pos.len())..];
     match op.as_str() {
-        "commit" if !obj.contains_key("message") && !rest.is_empty() => {
-            obj.insert("message".into(), Value::String(rest.join(" ")));
+        "commit" => {
+            if !obj.contains_key("message") && !rest.is_empty() {
+                obj.insert("message".into(), Value::String(rest[0].clone()));
+                if rest.len() > 1 && !obj.contains_key("pathspec") {
+                    obj.insert(
+                        "pathspec".into(),
+                        Value::Array(rest[1..].iter().cloned().map(Value::String).collect()),
+                    );
+                }
+            } else if obj.contains_key("message")
+                && !rest.is_empty()
+                && !obj.contains_key("pathspec")
+            {
+                obj.insert(
+                    "pathspec".into(),
+                    Value::Array(rest.iter().cloned().map(Value::String).collect()),
+                );
+            }
         }
         "diff" if !rest.is_empty() && !obj.contains_key("pathspec") => {
             obj.insert(

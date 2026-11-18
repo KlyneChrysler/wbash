@@ -339,6 +339,7 @@ impl Tool for SearchTool {
                 vec![format!("{}: {}", loc, hit.snippet)],
             ));
             if a.context > 0 {
+                // read once per hit file not ideal but cheap; cache per path would be better
                 if let Ok(t) = wbash_index::read_text(&ctx.root.join(&hit.path)) {
                     let all: Vec<&str> = t.content.lines().collect();
                     let lo = (hit.line as usize).saturating_sub(a.context as usize + 1);

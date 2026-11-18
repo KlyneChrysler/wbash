@@ -166,18 +166,26 @@ impl Tool for CheckTool {
             .iter()
             .filter(|d| d.severity == Severity::Warn)
             .count();
-        let mut header = if errors == 0 && failed == 0 {
+        let ok = all_ok && errors == 0 && failed == 0;
+        let mut header = if errors == 0 && failed == 0 && ok {
             if warnings == 0 {
                 "ok".to_string()
             } else {
                 format!("ok, {}", util::plural(warnings, "warning"))
             }
         } else {
-            format!(
-                "{}, {}",
-                util::plural(errors, "error"),
-                util::plural(warnings, "warning")
-            )
+            let mut parts = Vec::new();
+            if !ok && errors == 0 && failed == 0 {
+                parts.push("failed".to_string());
+            }
+            if errors > 0 {
+                parts.push(util::plural(errors, "error"));
+            }
+            if failed > 0 {
+                parts.push(util::plural(failed, "failed"));
+            }
+            parts.push(util::plural(warnings, "warning"));
+            parts.join(", ")
         };
         if failed > 0 && !header.contains("failed") {
             header.push_str(&format!(", {failed} failed"));
@@ -191,7 +199,7 @@ impl Tool for CheckTool {
         result.header = header;
         util::diagnostics_into(&mut result, diagnostics, ctx.root, ctx.handles)?;
         util::tests_into(&mut result, &tests, true);
-        result.meta.ok = all_ok && errors == 0 && failed == 0;
+        result.meta.ok = ok;
         result.meta.counts.insert("errors".into(), errors as i64);
         result
             .meta

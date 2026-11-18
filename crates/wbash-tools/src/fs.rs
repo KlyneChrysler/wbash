@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use similar::{ChangeTag, TextDiff};
 
-use wbash_core::args::{parse_args, parse_line_range};
+use wbash_core::args::{parse_args, parse_line_range, parse_line_range_clamped};
 use wbash_core::error::{Result, WErr};
 use wbash_core::hash;
 use wbash_core::registry::{Tool, ToolContext};
@@ -166,12 +166,27 @@ fn render_tree(
     for (name, child) in &node.dirs {
         let count = child.file_count();
         let over_depth = level + 1 >= max_depth;
-        if over_depth || child.files.len() > 40 || child.dir_count() > 40 {
+        let collapse = over_depth || child.files.len() > 40 || child.dir_count() > 40;
+        if collapse {
             result.push(Item::new(
                 ItemClass::High,
                 5.0,
                 vec![format!("{indent}{name}/ ({count})")],
             ));
+            let mut lines = Vec::new();
+            collect_tree_lines(child, &format!("{indent}  "), sizes, &mut lines);
+            if !lines.is_empty() {
+                let h = ctx
+                    .handles
+                    .put("tree", lines.join("\n").as_bytes(), "text")?;
+                result.must(format!("{indent}  expand {}", h.id));
+                result.handle(HandleRef {
+                    id: h.id.clone(),
+                    kind: h.kind.clone(),
+                    bytes: h.bytes,
+                    hash: h.hash.clone(),
+                });
+            }
         } else {
             result.push(Item::new(
                 ItemClass::High,
@@ -226,6 +241,22 @@ fn render_tree(
         }
     }
     Ok(())
+}
+
+fn collect_tree_lines(node: &DirNode, indent: &str, sizes: bool, out: &mut Vec<String>) {
+    for (name, child) in &node.dirs {
+        out.push(format!("{indent}{name}/ ({})", child.file_count()));
+        collect_tree_lines(child, &format!("{indent}  "), sizes, out);
+    }
+    let mut files = node.files.clone();
+    files.sort();
+    for (name, size) in &files {
+        if sizes {
+            out.push(format!("{indent}{name} ({})", human_size(*size)));
+        } else {
+            out.push(format!("{indent}{name}"));
+        }
+    }
 }
 
 fn human_size(n: u64) -> String {
@@ -301,9 +332,12 @@ impl Tool for ReadTool {
         let full_hex = hash::hash_bytes(file.content.as_bytes());
         let short = hash::short(&full_hex);
         if let Some(expect) = &a.expect_hash {
-            let ok = expect == &short
-                || expect == &full_hex
-                || full_hex.starts_with(expect.trim_start_matches("b3:"));
+            let exp = expect.trim_start_matches("b3:");
+            let ok = !exp.is_empty()
+                && (expect == &short
+                    || expect == &full_hex
+                    || full_hex.starts_with(exp)
+                    || short.trim_start_matches("b3:").starts_with(exp));
             if !ok {
                 return Err(WErr::with_hint(
                     "hash_mismatch",
@@ -320,11 +354,14 @@ impl Tool for ReadTool {
                     "read binary files without lines/symbol/outline filters",
                 ));
             }
+            let raw = std::fs::read(&abs).unwrap_or_default();
+            let full_hex = hash::hash_bytes(&raw);
+            let short = hash::short(&full_hex);
             let mut r = ToolResult::new(
                 "read",
-                format!("binary {} {} bytes {short}", a.path, file.size),
+                format!("binary {} {} bytes {short}", a.path, raw.len()),
             );
-            r.meta.counts.insert("bytes".into(), file.size as i64);
+            r.meta.counts.insert("bytes".into(), raw.len() as i64);
             return Ok(r);
         }
 
@@ -407,7 +444,7 @@ impl Tool for ReadTool {
         }
 
         if let Some(spec) = &a.lines {
-            let (start, end) = parse_line_range(spec, line_count)?;
+            let (start, end) = parse_line_range_clamped(spec, line_count)?;
             let count = end - start + 1;
             let mut r = ToolResult::new(
                 "read",
@@ -767,6 +804,7 @@ impl Tool for EditTool {
             std::fs::remove_file(&abs)
                 .map_err(|e| WErr::new("permission_denied", format!("delete {display}: {e}")))?;
             ctx.ledger.invalidate_path(&display);
+            ctx.workspace.invalidate();
             let mut r = ToolResult::new("edit", format!("deleted {display}"));
             r.meta.counts.insert("deleted".into(), 1);
             return Ok(r);
@@ -785,6 +823,7 @@ impl Tool for EditTool {
             }
             util::atomic_write(&abs, content.as_bytes())?;
             ctx.ledger.invalidate_path(&display);
+            ctx.workspace.invalidate();
             let short = hash::short(&hash::hash_str(&content));
             let mut r = ToolResult::new(
                 "edit",
@@ -796,14 +835,25 @@ impl Tool for EditTool {
             return Ok(r);
         }
 
-        let old = std::fs::read_to_string(&abs)
+        let file = wbash_index::read_text(&abs)
             .map_err(|e| WErr::new("not_found", format!("read {display}: {e}")))?;
+        if file.binary {
+            return Err(WErr::with_hint(
+                "binary_unsupported",
+                format!("'{display}' is binary"),
+                "edit text files only",
+            ));
+        }
+        let old = file.content;
         let old_hex = hash::hash_bytes(old.as_bytes());
         let old_short = hash::short(&old_hex);
         if let Some(expect) = &a.expect_hash {
-            let ok = expect == &old_short
-                || expect == &old_hex
-                || old_hex.starts_with(expect.trim_start_matches("b3:"));
+            let exp = expect.trim_start_matches("b3:");
+            let ok = !exp.is_empty()
+                && (expect == &old_short
+                    || expect == &old_hex
+                    || old_hex.starts_with(exp)
+                    || old_short.trim_start_matches("b3:").starts_with(exp));
             if !ok {
                 return Err(WErr::with_hint(
                     "hash_mismatch",
@@ -867,31 +917,52 @@ impl Tool for EditTool {
             let spec = a.lines.as_ref().unwrap();
             let line_count = old.lines().count();
             let (start, end) = parse_line_range(spec, line_count)?;
+            let eol = if old.contains("\r\n") { "\r\n" } else { "\n" };
             let had_trailing = old.ends_with('\n');
-            let mut lines: Vec<&str> = old.split('\n').collect();
+            let mut lines: Vec<String> = old
+                .split('\n')
+                .map(|l| l.strip_suffix('\r').unwrap_or(l).to_string())
+                .collect();
             if had_trailing {
                 lines.pop();
             }
-            let repl: Vec<&str> = if replace.is_empty() {
+            let repl: Vec<String> = if replace.is_empty() {
                 Vec::new()
             } else {
-                replace.split('\n').collect()
+                let mut rs: Vec<String> = replace
+                    .split('\n')
+                    .map(|l| l.strip_suffix('\r').unwrap_or(l).to_string())
+                    .collect();
+                // strip one trailing empty segment only when replace ends with a line break
+                // to avoid inserting an extra blank line on round-trips
+                if replace.ends_with('\n') && rs.last().map(|s| s.is_empty()).unwrap_or(false) {
+                    rs.pop();
+                }
+                rs
             };
             let ins = repl.len();
             let del = end - start + 1;
-            let mut out_lines: Vec<&str> = Vec::new();
+            let mut out_lines: Vec<String> = Vec::new();
             out_lines.extend_from_slice(&lines[..start - 1]);
-            out_lines.extend_from_slice(&repl);
+            out_lines.extend(repl);
             out_lines.extend_from_slice(&lines[end..]);
-            let mut new = out_lines.join("\n");
+            let mut new = out_lines.join(eol);
             if had_trailing || replace.ends_with('\n') {
-                new.push('\n');
+                new.push_str(eol);
             }
             (new, ins, del)
         };
 
-        util::atomic_write(&abs, new.as_bytes())?;
+        let bytes = match file.encoding.unwrap_or(wbash_index::TextEncoding::Utf8) {
+            enc @ (wbash_index::TextEncoding::Utf16Le
+            | wbash_index::TextEncoding::Utf16Be
+            | wbash_index::TextEncoding::Latin1) => wbash_index::encode_text(&new, enc)
+                .map_err(|e| WErr::new("invalid_args", format!("cannot encode edit: {e}")))?,
+            wbash_index::TextEncoding::Utf8 => new.as_bytes().to_vec(),
+        };
+        util::atomic_write(&abs, &bytes)?;
         ctx.ledger.invalidate_path(&display);
+        ctx.workspace.invalidate();
         let new_hex = hash::hash_bytes(new.as_bytes());
         let short = hash::short(&new_hex);
         let detailed = ctx.config.output.edit_confirm == "detailed";
@@ -1037,8 +1108,7 @@ impl Tool for ExpandTool {
         let text = String::from_utf8_lossy(&bytes).into_owned();
         let all: Vec<&str> = text.lines().collect();
         let total = all.len();
-        let mut selected: Vec<&str> = all.clone();
-
+        let mut selected: Vec<String> = Vec::new();
         if let Some(pattern) = &a.grep {
             let re = regex::Regex::new(pattern).map_err(|e| {
                 WErr::invalid_args(
@@ -1046,14 +1116,33 @@ impl Tool for ExpandTool {
                     "check escaping or use a simpler pattern",
                 )
             })?;
-            selected.retain(|l| re.is_match(l));
+            if let Some(spec) = &a.lines {
+                let (start, end) = parse_line_range_clamped(spec, total.max(1))?;
+                for (idx, line) in all.iter().enumerate() {
+                    let n = idx + 1;
+                    if n >= start && n <= end && re.is_match(line) {
+                        selected.push((*line).to_string());
+                    }
+                }
+            } else {
+                for line in &all {
+                    if re.is_match(line) {
+                        selected.push((*line).to_string());
+                    }
+                }
+            }
+        } else if let Some(spec) = &a.lines {
+            let (start, end) = parse_line_range_clamped(spec, total.max(1))?;
+            for (idx, line) in all.iter().enumerate() {
+                let n = idx + 1;
+                if n >= start && n <= end {
+                    selected.push((*line).to_string());
+                }
+            }
+        } else {
+            selected = all.iter().map(|s| (*s).to_string()).collect();
         }
-        if let Some(spec) = &a.lines {
-            let (start, end) = parse_line_range(spec, total.max(1))?;
-            let lo = start.saturating_sub(1).min(selected.len());
-            let hi = end.min(selected.len());
-            selected = selected[lo..hi].to_vec();
-        }
+        let mut selected: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
         if let Some(head) = a.head {
             selected.truncate(head as usize);
         }
@@ -1144,8 +1233,22 @@ impl Tool for ExpandTool {
             let mut budget = 8 * 1024 * 1024usize;
             body = inline_nested(&body, ctx, depth.min(64), &mut budget);
             r.raw_text = Some(body.clone());
-            for line in body.lines() {
-                r.must(line.to_string());
+            for line in body.lines().take(2000) {
+                r.low(line.to_string());
+            }
+            if body.lines().count() > 2000 {
+                let h = ctx.handles.put("expand_all", body.as_bytes(), "text")?;
+                r.must(format!(
+                    "...+{} lines ({})",
+                    body.lines().count().saturating_sub(2000),
+                    h.id
+                ));
+                r.handle(HandleRef {
+                    id: h.id.clone(),
+                    kind: h.kind.clone(),
+                    bytes: h.bytes,
+                    hash: h.hash.clone(),
+                });
             }
         } else {
             for line in &selected {

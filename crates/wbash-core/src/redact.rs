@@ -23,9 +23,9 @@ impl Redactor {
             // GitHub / GitLab / Slack style tokens.
             r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_\-]{20,}|xox[abprs]-[A-Za-z0-9\-]{10,})\b",
             // key = value style assignments in env/config-like content.
-            r#"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd|client[_-]?secret)\b\s*[:=]\s*['"]?[^\s'"]{4,}['"]?"#,
+            r#"(?i)\b(?:api[_-]?key|secret|token|password|passwd|pwd|client[_-]?secret)\b\s*[:=]\s*(?:"[^"\n]{4,}"|'[^'\n]{4,}'|[^\s'"\n]{4,})"#,
             // URL credentials.
-            r"://[^\s/:@]+:[^\s/@]+@",
+            r"(?i)(?:https?|postgres(?:ql)?|mysql|mongodb|redis|amqps?)://[^\s/:@]+:[^\s/@]+@",
         ]
         .iter()
         .filter_map(|p| Regex::new(p).ok())

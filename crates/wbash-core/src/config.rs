@@ -520,13 +520,35 @@ pub fn trust_root(root: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         paths::ensure_private_dir(parent).map_err(WErr::from)?;
     }
-    std::fs::write(&path, serde_json::to_vec_pretty(&set)?).map_err(WErr::from)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    let bytes = serde_json::to_vec_pretty(&set)?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
+    let res = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        f.write_all(&bytes)?;
+        f.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = res {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(WErr::from(e));
     }
-    Ok(())
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        WErr::from(e)
+    })
 }
 
 /// Render effective config with no secret values (there are none today).

@@ -42,23 +42,6 @@ pub fn canonicalize_lenient(path: &Path) -> std::io::Result<PathBuf> {
     let mut cur = abs.clone();
     let mut suffix: Vec<std::ffi::OsString> = Vec::new();
     loop {
-        if let Some(name) = cur.file_name() {
-            suffix.push(name.to_owned());
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "cannot resolve path",
-            ));
-        }
-        match cur.parent() {
-            Some(parent) => cur = parent.to_path_buf(),
-            None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "cannot resolve path",
-                ))
-            }
-        }
         if let Ok(mut base) = cur.canonicalize() {
             for comp in suffix.iter().rev() {
                 if comp == ".." {
@@ -68,6 +51,29 @@ pub fn canonicalize_lenient(path: &Path) -> std::io::Result<PathBuf> {
                 }
             }
             return Ok(base);
+        }
+        match cur.file_name() {
+            Some(name) => suffix.push(name.to_owned()),
+            None => {
+                // path ends in `..` or similar: consume the component name via iteration fallback
+                if let Some(last) = cur.components().next_back() {
+                    suffix.push(last.as_os_str().to_owned());
+                } else {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "cannot resolve path",
+                    ));
+                }
+            }
+        }
+        match cur.parent() {
+            Some(parent) => cur = parent.to_path_buf(),
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "cannot resolve path",
+                ))
+            }
         }
     }
 }

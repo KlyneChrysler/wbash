@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -75,24 +74,44 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| WErr::invalid_args("path has no parent directory", "use a file path"))?;
+    #[cfg(unix)]
+    let existing_mode = std::fs::metadata(path).ok().map(|m| {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode()
+    });
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     let tmp = parent.join(format!(
-        ".{}.w-bash-{}.tmp",
+        ".{}.w-bash-{}-{}.tmp",
         path.file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "file".to_string()),
-        std::process::id()
+        std::process::id(),
+        nonce
     ));
-    {
-        let mut f = std::fs::File::create(&tmp).map_err(|e| {
-            WErr::new(
-                "permission_denied",
-                format!("create {}: {e}", tmp.display()),
-            )
-        })?;
-        f.write_all(bytes)
-            .map_err(|e| WErr::new("permission_denied", format!("write {}: {e}", tmp.display())))?;
-        f.sync_all()
-            .map_err(|e| WErr::new("internal", format!("fsync {}: {e}", tmp.display())))?;
+    let write = || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        #[cfg(unix)]
+        if let Some(mode) = existing_mode {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(mode & 0o7777));
+        }
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        Ok(())
+    };
+    if let Err(e) = write() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(WErr::new(
+            "permission_denied",
+            format!("write {}: {e}", tmp.display()),
+        ));
     }
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);

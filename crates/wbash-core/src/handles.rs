@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Result, WErr};
@@ -8,10 +9,6 @@ use crate::paths;
 use crate::redact::Redactor;
 use crate::types::{now_ms, HandleRecord, HandleRef};
 
-/// Session-scoped, content-addressed-ish blob store (spec §3.3, §11.2).
-///
-/// IDs are monotonically allocated base36 counters and are never reused within
-/// a session. Blobs live under the private cache directory (0700/0600).
 pub struct HandleStore {
     dir: PathBuf,
     manifest: PathBuf,
@@ -21,6 +18,18 @@ pub struct HandleStore {
     max_bytes: u64,
     session_hash: String,
     redactor: Redactor,
+}
+
+struct FlockGuard {
+    fd: std::fs::File,
+}
+
+impl Drop for FlockGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.fd.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
 }
 
 impl HandleStore {
@@ -39,30 +48,25 @@ impl HandleStore {
         paths::ensure_private_dir(&base)
             .map_err(|e| WErr::new("permission_denied", format!("handle dir: {e}")))?;
         let manifest = base.join("manifest.jsonl");
-        let mut handles = BTreeMap::new();
-        let mut next = 1u64;
-        if let Ok(text) = std::fs::read_to_string(&manifest) {
-            for line in text.lines() {
-                if let Ok(rec) = serde_json::from_str::<HandleRecord>(line) {
-                    next = next.max(parse_id(&rec.id).map(|n| n + 1).unwrap_or(1));
-                    handles.insert(rec.id.clone(), rec);
-                }
-            }
-        }
-        Ok(Self {
+        let mut store = Self {
             dir: base,
             manifest,
-            handles,
-            next,
+            handles: BTreeMap::new(),
+            next: 1,
             ttl_secs,
             max_bytes,
             session_hash,
             redactor,
-        })
+        };
+        let _lock = store.lock(false)?;
+        store.reload_manifest()?;
+        drop(_lock);
+        Ok(store)
     }
 
-    /// Store text (redacted) or bytes and return a handle ref.
     pub fn put(&mut self, kind: &str, bytes: &[u8], content_type: &str) -> Result<HandleRef> {
+        let _lock = self.lock(true)?;
+        self.reload_manifest()?;
         let (stored, redacted, ctype) = if content_type == "text" {
             let text = String::from_utf8_lossy(bytes);
             let (red, n) = self.redactor.redact(&text);
@@ -85,24 +89,9 @@ impl HandleStore {
             redacted,
             content_type: ctype,
         };
-        let blob = self
-            .dir
-            .join(format!("{}.blob", id.trim_start_matches('~')));
-        write_private(&blob, &stored)?;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.manifest)
-        {
-            if let Ok(line) = serde_json::to_string(&rec) {
-                let _ = writeln!(f, "{line}");
-            }
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
-            }
-        }
+        let blob = self.blob_path(&id);
+        write_private_atomic(&blob, &stored)?;
+        append_manifest_line(&self.manifest, &rec)?;
         let out = HandleRef {
             id: id.clone(),
             kind: rec.kind.clone(),
@@ -110,13 +99,14 @@ impl HandleStore {
             hash: rec.hash.clone(),
         };
         self.handles.insert(id, rec);
-        self.evict_if_needed();
+        self.evict_if_needed_locked()?;
         Ok(out)
     }
 
     pub fn get(&mut self, id: &str) -> Result<(Vec<u8>, HandleRecord)> {
+        let _lock = self.lock(false)?;
         let now = now_ms();
-        let rec = self.handles.get(id).cloned().ok_or_else(|| {
+        let mut rec = self.handles.get(id).cloned().ok_or_else(|| {
             WErr::with_hint(
                 "handle_not_found",
                 format!("no handle '{id}' in this session"),
@@ -124,16 +114,17 @@ impl HandleStore {
             )
         })?;
         if now > rec.expires_ms {
-            self.remove(id);
+            drop(_lock);
+            let _x = self.lock(true)?;
+            self.remove_locked(id);
+            self.rewrite_manifest_locked()?;
             return Err(WErr::with_hint(
                 "handle_expired",
                 format!("handle '{id}' expired"),
                 "re-run the tool that produced it",
             ));
         }
-        let blob = self
-            .dir
-            .join(format!("{}.blob", id.trim_start_matches('~')));
+        let blob = self.blob_path(id);
         let bytes = std::fs::read(&blob).map_err(|_| {
             WErr::with_hint(
                 "handle_expired",
@@ -141,10 +132,8 @@ impl HandleStore {
                 "re-run the tool that produced it",
             )
         })?;
-        if let Some(r) = self.handles.get_mut(id) {
-            r.last_access_ms = now;
-        }
-        let rec = self.handles.get(id).cloned().unwrap();
+        rec.last_access_ms = now;
+        self.handles.insert(id.to_string(), rec.clone());
         Ok((bytes, rec))
     }
 
@@ -157,6 +146,18 @@ impl HandleStore {
     }
 
     pub fn gc(&mut self) -> u64 {
+        let _lock = match self.lock(true) {
+            Ok(l) => l,
+            Err(_) => return 0,
+        };
+        let _ = self.reload_manifest();
+        let removed = self.gc_locked();
+        let _ = self.rewrite_manifest_locked();
+        drop(_lock);
+        removed
+    }
+
+    fn gc_locked(&mut self) -> u64 {
         let now = now_ms();
         let expired: Vec<String> = self
             .handles
@@ -166,7 +167,7 @@ impl HandleStore {
             .collect();
         let mut removed = expired.len() as u64;
         for id in expired {
-            self.remove(&id);
+            self.remove_locked(&id);
         }
         while self.total_bytes() > self.max_bytes {
             let victim = self
@@ -176,31 +177,88 @@ impl HandleStore {
                 .map(|h| h.id.clone());
             match victim {
                 Some(id) => {
-                    self.remove(&id);
+                    self.remove_locked(&id);
                     removed += 1;
                 }
                 None => break,
             }
         }
-        self.rewrite_manifest();
         removed
     }
 
-    fn evict_if_needed(&mut self) {
+    fn evict_if_needed_locked(&mut self) -> Result<()> {
         if self.total_bytes() > self.max_bytes {
-            self.gc();
+            self.gc_locked();
+            self.rewrite_manifest_locked()?;
         }
+        Ok(())
     }
 
-    fn remove(&mut self, id: &str) {
+    fn remove_locked(&mut self, id: &str) {
         self.handles.remove(id);
-        let blob = self
-            .dir
-            .join(format!("{}.blob", id.trim_start_matches('~')));
-        let _ = std::fs::remove_file(blob);
+        let _ = std::fs::remove_file(self.blob_path(id));
     }
 
-    fn rewrite_manifest(&self) {
+    fn blob_path(&self, id: &str) -> PathBuf {
+        self.dir
+            .join(format!("{}.blob", id.trim_start_matches('~')))
+    }
+
+    fn lock(&self, exclusive: bool) -> Result<FlockGuard> {
+        let lock_path = self.dir.join(".lock");
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|e| {
+                WErr::new(
+                    "permission_denied",
+                    format!("lock {}: {e}", lock_path.display()),
+                )
+            })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        let op = if exclusive {
+            libc::LOCK_EX
+        } else {
+            libc::LOCK_SH
+        };
+        let rc = unsafe { libc::flock(f.as_raw_fd(), op) };
+        if rc != 0 {
+            return Err(WErr::new(
+                "internal",
+                format!(
+                    "flock {}: {}",
+                    lock_path.display(),
+                    std::io::Error::last_os_error()
+                ),
+            ));
+        }
+        Ok(FlockGuard { fd: f })
+    }
+
+    fn reload_manifest(&mut self) -> Result<()> {
+        let mut handles = BTreeMap::new();
+        let mut next = self.next.max(1);
+        if let Ok(text) = std::fs::read_to_string(&self.manifest) {
+            for line in text.lines() {
+                if let Ok(rec) = serde_json::from_str::<HandleRecord>(line) {
+                    next = next.max(parse_id(&rec.id).map(|n| n + 1).unwrap_or(1));
+                    handles.insert(rec.id.clone(), rec);
+                }
+            }
+        }
+        self.handles = handles;
+        self.next = next;
+        Ok(())
+    }
+
+    fn rewrite_manifest_locked(&self) -> Result<()> {
         let mut text = String::new();
         for rec in self.handles.values() {
             if let Ok(line) = serde_json::to_string(rec) {
@@ -208,24 +266,84 @@ impl HandleStore {
                 text.push('\n');
             }
         }
-        let _ = write_private(&self.manifest, text.as_bytes());
+        write_private_atomic(&self.manifest, text.as_bytes())
     }
 }
 
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut f = std::fs::File::create(path).map_err(|e| {
+fn append_manifest_line(path: &Path, rec: &HandleRecord) -> Result<()> {
+    use std::io::Write;
+    let line =
+        serde_json::to_string(rec).map_err(|e| WErr::internal(format!("manifest json: {e}")))?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| {
+            WErr::new(
+                "permission_denied",
+                format!("manifest {}: {e}", path.display()),
+            )
+        })?;
+    writeln!(f, "{line}").map_err(|e| {
         WErr::new(
             "permission_denied",
-            format!("write {}: {e}", path.display()),
+            format!("manifest {}: {e}", path.display()),
         )
     })?;
-    f.write_all(bytes)
-        .map_err(|e| WErr::new("internal", format!("write {}: {e}", path.display())))?;
     f.sync_all().ok();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| WErr::internal(format!("path {} has no parent", path.display())))?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = parent.join(format!(
+        ".{}.tmp-{}-{nonce}",
+        path.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "f".to_string()),
+        std::process::id()
+    ));
+    let res = (|| -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = res {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(WErr::new(
+            "permission_denied",
+            format!("write {}: {e}", path.display()),
+        ));
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(WErr::new(
+            "permission_denied",
+            format!("rename {}: {e}", path.display()),
+        ));
+    }
+    if let Ok(dir) = std::fs::File::open(parent) {
+        let _ = dir.sync_all();
     }
     Ok(())
 }

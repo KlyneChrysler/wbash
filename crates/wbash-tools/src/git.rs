@@ -186,6 +186,16 @@ fn status(ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
     Ok(r)
 }
 
+fn reject_dash_arg(name: &str, val: &str) -> Result<()> {
+    if val.starts_with('-') {
+        return Err(WErr::invalid_args(
+            format!("git {name} must not start with '-'"),
+            format!("pass a {name} value, not an option"),
+        ));
+    }
+    Ok(())
+}
+
 fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     let context = a.context.unwrap_or(3);
     if context > ctx.config.search.context_max {
@@ -254,7 +264,7 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
 }
 
 fn log(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
-    let limit = a.limit.unwrap_or(20);
+    let limit = a.limit.unwrap_or(20).clamp(1, 500);
     let limit_s = format!("-n{limit}");
     let mut args: Vec<String> = vec![
         "log".to_string(),
@@ -264,6 +274,7 @@ fn log(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
         limit_s,
     ];
     if let Some(r) = &a.reference {
+        reject_dash_arg("ref", r)?;
         args.push(r.clone());
     }
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -288,6 +299,7 @@ fn show(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
         .reference
         .clone()
         .ok_or_else(|| WErr::invalid_args("show requires ref", "ref=HEAD"))?;
+    reject_dash_arg("ref", &reference)?;
     let mut args: Vec<String> = vec![
         "show".to_string(),
         "--no-color".to_string(),
@@ -440,6 +452,16 @@ fn commit(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     if a.allow_empty {
         args.push("--allow-empty".to_string());
     }
+    let paths = pathspecs(a)?;
+    if !paths.is_empty() {
+        if a.staged {
+            // commit staged subset: ensure index-only commit context
+            args.push("--".to_string());
+        } else {
+            args.push("--".to_string());
+        }
+        args.extend(paths);
+    }
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = git(ctx, &refs).map_err(map_git_err)?;
     let mut r = ToolResult::new(
@@ -477,9 +499,11 @@ fn push(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     policy::check_tier(ctx.tier, Tier::GitWrite, "git push")?;
     let mut args: Vec<String> = vec!["push".to_string()];
     if let Some(remote) = &a.remote {
+        reject_dash_arg("remote", remote)?;
         args.push(remote.clone());
     }
     if let Some(branch) = &a.branch {
+        reject_dash_arg("branch", branch)?;
         args.push(branch.clone());
     }
     if a.set_upstream {

@@ -75,7 +75,7 @@ impl McpServer {
             .and_then(Value::as_str)
             .unwrap_or("default");
         let rendered = self.dispatcher.call(&name, &args, session);
-        let is_error = rendered.is_error;
+        let is_error = rendered.is_error || !rendered.ok;
         Ok(json!({
             "content": [{"type": "text", "text": rendered.text}],
             "isError": is_error

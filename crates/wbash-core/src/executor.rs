@@ -56,7 +56,9 @@ impl ExecOutput {
 fn env_allowed(allow: &[String], key: &str) -> bool {
     allow.iter().any(|a| {
         if let Some(prefix) = a.strip_suffix('*') {
-            key.len() >= prefix.len() && key[..prefix.len()].eq_ignore_ascii_case(prefix)
+            key.get(..prefix.len())
+                .map(|s| s.eq_ignore_ascii_case(prefix))
+                .unwrap_or(false)
         } else {
             a.eq_ignore_ascii_case(key)
         }
@@ -78,7 +80,7 @@ pub fn build_env(
     if !env.contains_key("PATH") {
         env.insert(
             "PATH".to_string(),
-            "/usr/local/bin:/usr/bin:/bin".to_string(),
+            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin".to_string(),
         );
     }
     if let Some(extra) = per_call {
