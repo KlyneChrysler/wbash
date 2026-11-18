@@ -53,6 +53,10 @@ const BOOLEANS: &[&str] = &[
     "json",
     "quiet",
     "force",
+    "word",
+    "regex",
+    "dry_run",
+    "dry-run",
 ];
 
 pub fn run(argv: Vec<String>) -> i32 {
@@ -866,7 +870,7 @@ fn print_help() {
     );
     println!();
     println!(
-        "tools: tree(t) read(r) search(s) edit(e) run(u) check(c) git(g) expand(x) batch(b) sh"
+        "tools: tree(t) read(r) search(s) edit(e) replace(p) run(u) check(c) git(g) expand(x) batch(b) sh"
     );
     println!("utility: gain discover config handles parser");
     println!();
