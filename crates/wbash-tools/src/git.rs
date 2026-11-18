@@ -207,6 +207,37 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
             "context=3",
         ));
     }
+    if a.staged && a.reference.is_some() {
+        return Err(WErr::invalid_args(
+            "git diff: cannot combine --staged with ref",
+            "use ref=HEAD or --staged",
+        ));
+    }
+    if let Some(r) = &a.reference {
+        reject_dash_arg("ref", r)?;
+    }
+    let paths = pathspecs(a)?;
+    let mut reference = a.reference.clone();
+    if reference.is_some() && paths.is_empty() {
+        let r = reference.as_deref().unwrap_or_default();
+        let verify = git(
+            ctx,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{r}^{{commit}}"),
+            ],
+        );
+        let is_ref = match verify {
+            Ok(o) => o.exit.is_success(),
+            Err(_) => false,
+        };
+        if !is_ref {
+            // fall back: treat as pathspec (e.g. w git diff README.md)
+            reference = None;
+        }
+    }
     let mut argv: Vec<String> = vec![
         "diff".to_string(),
         "--no-color".to_string(),
@@ -215,10 +246,17 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     if a.staged {
         argv.push("--cached".to_string());
     }
-    let paths = pathspecs(a)?;
-    if !paths.is_empty() {
+    if let Some(r) = &reference {
+        argv.push(r.clone());
+    }
+    let final_paths = if reference.is_none() && a.reference.is_some() && paths.is_empty() {
+        vec![a.reference.clone().unwrap_or_default()]
+    } else {
+        paths
+    };
+    if !final_paths.is_empty() {
         argv.push("--".to_string());
-        argv.extend(paths);
+        argv.extend(final_paths);
     }
     let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
     let out = git(ctx, &refs).map_err(map_git_err)?;

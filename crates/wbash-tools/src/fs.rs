@@ -80,16 +80,17 @@ impl Tool for TreeTool {
 
         let mut root = DirNode::default();
         for f in &walk.files {
-            let rel = f
-                .rel
-                .strip_prefix(&base_rel)
-                .unwrap_or(&f.rel)
-                .trim_start_matches('/');
-            let rel = if rel.is_empty() {
+            let rel = if base_rel == "." {
                 f.rel.clone()
             } else {
-                rel.to_string()
+                f.rel
+                    .strip_prefix(&format!("{base_rel}/"))
+                    .unwrap_or(&f.rel)
+                    .to_string()
             };
+            if rel.is_empty() {
+                continue;
+            }
             let parts: Vec<&str> = rel.split('/').filter(|p| !p.is_empty()).collect();
             if parts.is_empty() {
                 continue;

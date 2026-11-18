@@ -549,11 +549,39 @@ fn build_git_args(obj: &mut Map<String, Value>, pos: &[String]) -> Result<()> {
                 );
             }
         }
-        "diff" if !rest.is_empty() && !obj.contains_key("pathspec") => {
-            obj.insert(
-                "pathspec".into(),
-                Value::Array(rest.iter().cloned().map(Value::String).collect()),
-            );
+        "diff" => {
+            if let Some(idx) = rest.iter().position(|t| t == "--") {
+                let left = &rest[..idx];
+                let right = &rest[idx + 1..];
+                if left.len() > 1 {
+                    return Err(WErr::invalid_args(
+                        "git diff: too many refs before --",
+                        "git diff [ref] [-- paths...]",
+                    ));
+                }
+                if let Some(r) = left.first() {
+                    if !obj.contains_key("ref") {
+                        obj.insert("ref".into(), Value::String(r.clone()));
+                    }
+                }
+                if !right.is_empty() && !obj.contains_key("pathspec") {
+                    obj.insert(
+                        "pathspec".into(),
+                        Value::Array(right.iter().cloned().map(Value::String).collect()),
+                    );
+                }
+            } else if !rest.is_empty() && !obj.contains_key("pathspec") && !obj.contains_key("ref")
+            {
+                if rest.len() == 1 {
+                    obj.insert("ref".into(), Value::String(rest[0].clone()));
+                } else {
+                    obj.insert("ref".into(), Value::String(rest[0].clone()));
+                    obj.insert(
+                        "pathspec".into(),
+                        Value::Array(rest[1..].iter().cloned().map(Value::String).collect()),
+                    );
+                }
+            }
         }
         "show" => {
             if let Some(r) = rest.first() {
