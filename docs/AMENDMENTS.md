@@ -151,3 +151,13 @@ reason and the affected gate/test.
 ## A28. Bounded compiler/linter hints
 - Cargo JSON `children` with level `help`/`note` (first two) and ESLint `suggestions[].desc` are appended to the diagnostic message as `; help: ...`, capped at 300 chars total. Generic tails already retain `= help:`/`= note:` within the error window.
 - Tests: `crates/wbash-parsers/tests/parsers.rs`.
+
+## A29. `replace` tool
+- Added `replace` for multi-file literal/word/regex substitution with scope controls (`path`/`paths`/`glob`), `max_files`, `limit`, and `dry_run`. Replaces all matches (bounded), writes atomically per file, skips binaries, returns count-bearing headers with compact diff lines (budget-fitted). 0 matches -> `!replace_not_found`.
+- Reason: `edit` requires a unique anchor and is single-file; agents need safe bulk renames/sweeps.
+- Tests: `crates/wbash-tools`/CLI coverage, MCP schema list includes `replace`.
+
+## A30. Hot-path caching and check dedupe
+- Search/read paths use Arc-shared cached file text (rel-keyed, mtime/size validated), hoisted pattern work, cached context reads, and metadata-aware symbol lookups. Index prefetch skips files >64KB and known-binary extensions. Handle manifests append per put and compact on eviction/GC. In-place edits update workspace cache incrementally. `check all` skips redundant compile steps (`cargo check` when clippy runs; `go build` when vet/test runs).
+- Reason: reduce warm latency and per-file allocations/clones without changing tool semantics.
+- Tests: `crates/wbash-index`/`crates/wbash-core`/`crates/wbash-tools` unit, golden, invariant, differential suites; warm perf.

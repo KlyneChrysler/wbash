@@ -11,6 +11,7 @@ JSON schemas are generated from the same argument structs and exposed over MCP
 | `search` | read_only | Text or regex search, definition-ranked |
 | `expand` | read_only | Expand a handle with grep/lines/head/tail filters |
 | `edit` | write_workspace | Literal anchor edit, line splice, create, delete |
+| `replace` | write_workspace | Multi-file text replace (literal/word/regex), dry-run |
 | `run` | execute | argv execution with parsers and compact fallback |
 | `check` | execute | Detect and run build/lint/type/test commands |
 | `git` | read_only (writes gated) | status/diff/log/show/blame/branch/commit/push |
@@ -29,12 +30,17 @@ JSON schemas are generated from the same argument structs and exposed over MCP
 - `search`: `pattern`, `mode="text"|"regex"|"symbol"`, `path="."` (or multiple paths), `paths`, `glob`, `context=0`,
   `limit`. Returns ranked matches; CLI accepts multiple positional paths (e.g.
   `w search pat src tests`). Counts use singular/plural forms; a zero-result
-  search that skipped binary files notes `# skipped N binary file(s)`.
+  search that skipped binary files notes `# skipped N binary file(s)`. Files with
+  >=3 returned hits are grouped as `path (N):` with indented `line: snippet`.
 - `expand`: `ref="~id"`, `grep`, `lines`, `head`, `tail`, `offset=0`, `all=false`, `depth=0`. `all=true` emits full selected content (no elision); `depth` (max 2, with `all`) inlines small nested text handles to reduce multi-hop recovery.
 - `edit`: `path` plus exactly one operation: `find`+`replace` (unique literal
   match), `lines`+`content` (splice), `create=true`+`content`, `overwrite=true`
   + `content`, or `delete=true`. `expect_hash` rejects stale writes. Writes are
   atomic; a post-write syntax check is advisory. Confirmation is compact by default (`output.edit_confirm`).
+- `replace`: `find` (req), `replace` (req), `path="."` (or `paths`), `glob`,
+  `word=false`, `regex=false`, `dry_run=false`, `max_files=200`, `limit`. Literal
+  by default; replaces all matches in scope. Returns compact per-file diff lines
+  (budget-elided) and counts. Writes are atomic per file.
 - `run`: `argv=[...]` (no shell), `cwd="."`, `timeout_ms`, `stdin`, `env`
   (allowlisted keys only). Parsers consume injected/machine streams when used,
   while rendered tails/`raw_text`/`full` handles use user-relevant output with

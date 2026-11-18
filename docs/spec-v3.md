@@ -225,6 +225,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 | `expand` | read_only | yes | no | yes | — |
 | `git` (status/diff/log/show/blame/branch) | read_only | yes | no | yes | — |
 | `edit` | write_workspace | no | conditional | conditional | — |
+| `replace` | write_workspace | no | yes | no | — |
 | `run` | execute | no | unknown | no | — |
 | `check` | execute | no | no | mostly | — |
 | `git` (commit/push) | git_write | no | yes | no | write ops |
@@ -273,7 +274,15 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Output:** `created <path> (<bytes> bytes)` | `edited <path> (+ins -del)` (default compact; `output.edit_confirm=detailed` or verbose may include `(b3:new)`) | `deleted <path>` plus optional diag suffix.
 - **Errors:** `not_found`, `already_exists`, `ambiguous_anchor`, `hash_mismatch`, `invalid_range`, `outside_workspace`, `permission_denied`, `invalid_args`, `is_directory`.
 
-### 5.7 `run`
+### 5.7 `replace`
+- **Args:** `find` (req), `replace` (req), `path="."`, `paths[]`, `glob?`, `word=false`, `regex=false`, `dry_run=false`, `max_files=200`, `limit?`.
+- **Matching:** literal byte/string matching by default; `word` wraps escaped literal with `\b`; `regex` uses the provided pattern. Replaces all matches (bounded by `limit` when set).
+- **Scope/limits:** resolves paths within workspace, honors gitignore/walk and glob; skips binary files; rejects scope > `max_files` with `!too_many_files`.
+- **Execution:** per-file atomic write (fsync+rename) unless `dry_run`; ledger invalidated and workspace cache updated per changed file.
+- **Output:** `replaced <N> match(es) in <M> file(s)` or `dry_run: ...` plus compact `path:line: -old`/`+new` diff lines (budget-fitted, elision handle). 0 matches -> `!replace_not_found`.
+- **Errors:** `invalid_args`, `invalid_regex`, `too_many_files`, `replace_not_found`, `outside_workspace`, `permission_denied`.
+
+### 5.8 `run`
 - **Args:** `argv` (string[], req, len≥1), `cwd?="."`, `timeout_ms?=120000` (≤`exec.max_timeout_ms`), `stdin?`, `env?` (map, keys must pass allowlist policy), `budget?`.
 - **Execution:** direct exec (no shell). Resolve `argv[0]` via PATH in exec env. `cwd` jailed. Child env is allowlisted (including toolchain-relevant vars/patterns such as `CARGO_*`/`CARGO_TARGET_DIR`, Go/Python/Node/Java/Maven/Gradle families as configured) with secret-key denial enforced.
 - **Capture/limits:** stream stdout/stderr to disk up to `exec.max_output_bytes`; keep bounded tail in memory; preserve order (PTY only if required, v0.1 default pipes). On timeout send TERM then KILL to process group; return partial handle.
@@ -281,7 +290,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Output:** header `exit <code|timeout>[, <dur>][, <counts/summary>]` where parsed counts are known (e.g. passed/failed/errors/warnings). In `minimal` on clean success, prefer summary-only output (omit redundant bodies/boilerplate) while keeping counts/exit. Failures preserve error/fail/test facts, error-tied context/frames when available, and terminal summaries; compaction is signal-first (on error paths warning-only bodies collapsed/counted). `full: ~h` provided when content is omitted/needed for lossless access.
 - **Errors:** `exec_not_found`, `permission_denied`, `policy_denied`, `invalid_args`, `cwd_not_found`.
 
-### 5.8 `check`
+### 5.9 `check`
 - **Args:** `kind=all|build|lint|types|test`, `path="."`, `budget?`.
 - **Detection/mapping (v0.1):**
   - Rust (`Cargo.toml`): build/test/clippy via cargo parsers
@@ -292,26 +301,26 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Output:** count-bearing header — `ok[, <P> passed][, <W> warnings]` when no errors/failures, else `<E> errors, <W> warnings[, <F> failed][, <P> passed]` — plus records/summary; signal-first compaction on failures, handles for omitted/verbose detail.
 - **Errors:** `no_checker_detected` (actionable hint), `policy_denied`, `outside_workspace`.
 
-### 5.9 `git`
+### 5.10 `git`
 - **Args:** `op` (req) + op args.
 - **Read ops (read_only):** `status`, `diff` (`staged=false`, `pathspec?`, `context?`), `log` (`limit=20`, `ref?`), `show` (`ref`, `pathspec?`), `blame` (`path` req, `lines?`), `branch`.
 - **Write ops (git_write, explicit):** `commit` (`message` req, `all=false`, `allow_empty=false`), `push` (`remote?`, `branch?`, `set_upstream=false`). v0.1 MUST NOT support force push/amend-by-default destructive flags.
 - **Behavior:** native `gix` where supported; compact deterministic rendering (grouped status, minimal hunk headers, one-line log). If operation unsupported by backend, `!git_error unsupported op '<op>' in v0.1 backend. <hint>`.
 - **Errors:** `not_a_repo`, `git_error`, `policy_denied`, `invalid_args`.
 
-### 5.10 `expand`
+### 5.11 `expand`
 - **Args:** `ref` (req), `grep?` (regex), `lines?`, `head?`, `tail?`, `offset=0` (line/byte tokenized window per mode), `budget?`.
 - **Semantics:** resolve handle in session; apply filters in order `grep` → `lines` → `head|tail` → `offset/cap`; return filtered view with continuation note/offset hint when truncated.
 - **Errors:** `handle_not_found`, `handle_expired`, `invalid_regex`, `invalid_range`, `invalid_args`.
 
-### 5.11 `batch`
+### 5.12 `batch`
 - **Args:** `calls` (req array of `{tool:string,args:object}`), max 16 (config `batch.max_calls`), `budget?`.
 - **Execution:** validate envelope and each child schema; compute effective tier as max(child tiers) and policy-check upfront for gated tools; execute children in parallel when independent (v0.1 default all independent); collect results; emit in input order. Child failure MUST NOT cancel siblings.
 - **Budgeting:** allocate per-child default budgets proportionally within total, but MUST preserve each child’s must-keep items; if total exceeded emit per-child results with required elisions and overall `# budget_exceeded_must_keep` when applicable.
 - **Output:** header `<ok> ok, <err> error, <n> total` then blocks `#<i> <tool> ok|error` followed by child payload.
 - **Errors:** envelope/schema issues `invalid_args`; child errors inline.
 
-### 5.12 `sh` (escape hatch)
+### 5.13 `sh` (escape hatch)
 - **Args:** `command` (string, req), `cwd?`, `timeout_ms?`, `budget?`.
 - **Policy:** requires tier ≥ execute and `exec.allow_shell=true` (default false). MUST record usage in stats/discover.
 - **Execution:** `/bin/sh -lc <command>` on POSIX; same env scrub/limits/capture/redaction as `run`; generic compaction only; full output handle-backed when non-trivial.
