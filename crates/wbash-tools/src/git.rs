@@ -221,9 +221,9 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     let mut minus = 0usize;
     for line in out.stdout_str().lines() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
-            let path = rest.rsplit(" b/").next().unwrap_or(rest).trim().to_string();
+            let name = rest.rsplit(" b/").next().unwrap_or(rest).trim().to_string();
             files += 1;
-            r.high(format!("diff {path}"));
+            r.must(format!("diff {name}"));
             continue;
         }
         if line.starts_with("@@") {
@@ -310,7 +310,14 @@ fn show(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     let mut r = ToolResult::new("git", format!("show {reference}"));
     r.raw_text = Some(stdout.to_string());
     for line in stdout.lines() {
-        if line.starts_with("diff --git") || line.starts_with("@@") {
+        if line.starts_with("diff --git") {
+            let name = line
+                .strip_prefix("diff --git ")
+                .and_then(|rest| rest.rsplit(" b/").next())
+                .unwrap_or(line)
+                .trim();
+            r.must(format!("diff {name}"));
+        } else if line.starts_with("@@") {
             r.high(line.to_string());
         } else {
             r.low(line.to_string());

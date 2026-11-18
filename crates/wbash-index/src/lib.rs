@@ -159,16 +159,22 @@ impl Workspace {
 
     /// Read text preferring in-memory/disk-backed content cache.
     pub fn read_cached_text(&self, entry: &FileEntry) -> std::io::Result<TextFile> {
-        if let Some(t) = self.cached_text(&entry.rel, entry.size, entry.mtime_ms) {
+        let meta = std::fs::metadata(&entry.abs)?;
+        let mtime_ms = mtime_ms(&meta);
+        let size = meta.len();
+        if mtime_ms != entry.mtime_ms || size != entry.size {
+            self.invalidate();
+        }
+        if let Some(t) = self.cached_text(&entry.rel, size, mtime_ms) {
             return Ok(TextFile {
                 content: t,
                 binary: false,
-                size: entry.size,
+                size,
             });
         }
         let tf = read_text(&entry.abs)?;
         if !tf.binary {
-            self.store_content(&entry.rel, entry.size, entry.mtime_ms, tf.content.clone());
+            self.store_content(&entry.rel, size, mtime_ms, tf.content.clone());
         }
         Ok(tf)
     }
@@ -189,6 +195,9 @@ impl Workspace {
 
         let mut files = Vec::new();
         let mut dirs: Vec<(String, i64)> = Vec::new();
+        if let Ok(meta) = std::fs::metadata(&self.root) {
+            dirs.push((".".to_string(), mtime_ms(&meta)));
+        }
         let mut truncated = false;
         for entry in builder.build().flatten() {
             let ft = match entry.file_type() {
@@ -304,10 +313,11 @@ impl Workspace {
             return None;
         }
         for (rel, m) in &dc.dirs {
-            if rel == "." {
-                continue;
-            }
-            let p = self.root.join(rel);
+            let p = if rel == "." {
+                self.root.clone()
+            } else {
+                self.root.join(rel)
+            };
             let meta = std::fs::metadata(&p).ok()?;
             if !meta.is_dir() || mtime_ms(&meta) != *m {
                 return None;
@@ -388,25 +398,59 @@ pub struct TextFile {
 pub fn read_text(abs: &Path) -> std::io::Result<TextFile> {
     let bytes = std::fs::read(abs)?;
     let size = bytes.len() as u64;
-    let binary = is_binary(&bytes);
-    let content = String::from_utf8_lossy(&bytes).into_owned();
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        return Ok(TextFile {
+            content: String::from_utf16_lossy(&units),
+            binary: false,
+            size,
+        });
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
+        return Ok(TextFile {
+            content: String::from_utf16_lossy(&units),
+            binary: false,
+            size,
+        });
+    }
+    if bytes.contains(&0) {
+        return Ok(TextFile {
+            content: String::from_utf8_lossy(&bytes).into_owned(),
+            binary: true,
+            size,
+        });
+    }
+    if let Ok(s) = std::str::from_utf8(&bytes) {
+        return Ok(TextFile {
+            content: s.to_string(),
+            binary: false,
+            size,
+        });
+    }
+    // treat invalid UTF-8 without NULs as text (e.g. Latin-1)
+    let content: String = bytes.iter().map(|&b| b as char).collect();
     Ok(TextFile {
         content,
-        binary,
+        binary: false,
         size,
     })
 }
 
 pub fn is_binary(bytes: &[u8]) -> bool {
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        return false;
+    }
     if bytes.contains(&0) {
         return true;
     }
-    match std::str::from_utf8(bytes) {
-        Ok(_) => false,
-        // `error_len() == None` means the input ended mid-code-point, which is
-        // still text (a truncated tail), not a binary file.
-        Err(e) => e.error_len().is_some(),
-    }
+    false
 }
 
 pub fn is_test_or_vendor(rel: &str) -> bool {
@@ -918,8 +962,8 @@ mod tests {
     }
 
     #[test]
-    fn invalid_utf8_is_binary() {
-        assert!(is_binary(b"hello \xFF world"));
+    fn invalid_utf8_is_text() {
+        assert!(!is_binary(b"hello \xFF world"));
     }
 
     #[test]
@@ -953,11 +997,10 @@ mod tests {
     }
 
     #[test]
-    fn utf16_nul_and_invalid_utf8_sequences_are_binary() {
-        // UTF-16 LE BOM/text contains NUL bytes
-        assert!(is_binary(&[0xFF, 0xFE, 0x68, 0x00, 0x69, 0x00]));
-        // Invalid UTF-8 continuation/sequence (not a truncated tail)
-        assert!(is_binary(b"caf\xC3\x28"));
-        assert!(is_binary(b"\xE9mid"));
+    fn utf16_bom_and_latin1_sequences_are_text() {
+        assert!(!is_binary(&[0xFF, 0xFE, 0x68, 0x00, 0x69, 0x00]));
+        assert!(!is_binary(&[0xFE, 0xFF, 0x00, 0x68, 0x00, 0x69]));
+        assert!(!is_binary(b"caf\xC3\x28"));
+        assert!(!is_binary(b"\xE9mid"));
     }
 }

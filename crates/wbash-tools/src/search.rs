@@ -158,11 +158,30 @@ impl Tool for SearchTool {
                             score += 6;
                         }
                         score += path_boost(&f.rel, &pat_lc);
+                        let line_text = s.line_text.trim();
+                        let kind_lc = s.kind.to_ascii_lowercase();
+                        let snippet = if line_text
+                            .to_ascii_lowercase()
+                            .starts_with(&format!("{kind_lc} "))
+                            || line_text
+                                .to_ascii_lowercase()
+                                .starts_with(&format!("pub {kind_lc} "))
+                            || line_text
+                                .to_ascii_lowercase()
+                                .starts_with(&format!("export {kind_lc} "))
+                            || line_text
+                                .to_ascii_lowercase()
+                                .starts_with(&format!("async {kind_lc} "))
+                        {
+                            line_text.to_string()
+                        } else {
+                            format!("{} {}", s.kind, line_text)
+                        };
                         hits.push(Hit {
                             path: f.rel.clone(),
                             line: s.start_line as u32,
                             col: 1,
-                            snippet: format!("{} {}", s.kind, s.line_text),
+                            snippet,
                             is_definition: true,
                             score,
                         });

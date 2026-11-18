@@ -228,7 +228,7 @@ pub fn record_output(
                 .insert("warnings".into(), warnings as i64);
         }
         if parse_miss && !raw.trim().is_empty() {
-            result.note("parse_miss raw_tail");
+            result.note("parse_miss");
             util::compact_tail(result, &raw, label, ctx.handles, true)?;
             result
                 .items
@@ -251,7 +251,7 @@ pub fn record_output(
         }
     } else if !raw.trim().is_empty() {
         if !output.exit.is_success() {
-            result.note("parse_miss raw_tail");
+            result.note("parse_miss");
             util::compact_tail(result, &raw, label, ctx.handles, true)?;
             result
                 .items

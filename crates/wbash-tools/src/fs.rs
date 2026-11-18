@@ -1136,12 +1136,13 @@ impl Tool for ExpandTool {
         }
 
         let mut body = selected.join("\n") + if selected.is_empty() { "" } else { "\n" };
-        let max_depth = a.depth.min(2);
-        if a.all && max_depth > 0 {
-            let mut budget = 65536usize;
-            body = inline_nested(&body, ctx, max_depth, &mut budget);
-        }
         if a.all {
+            let mut depth = a.depth;
+            if depth == 0 {
+                depth = 8;
+            }
+            let mut budget = 8 * 1024 * 1024usize;
+            body = inline_nested(&body, ctx, depth.min(64), &mut budget);
             r.raw_text = Some(body.clone());
             for line in body.lines() {
                 r.must(line.to_string());

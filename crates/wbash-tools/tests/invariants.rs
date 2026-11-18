@@ -165,7 +165,7 @@ fn tool_invariants() {
         "run",
         json!({"argv": ["sh", "-c", "echo 'error[E1]: bad'; echo '  --> x.rs:1:1'; exit 2"]}),
     );
-    assert!(miss.text.contains("# parse_miss raw_tail"), "{}", miss.text);
+    assert!(miss.text.contains("# parse_miss"), "{}", miss.text);
     assert!(miss.text.contains("error[E1]: bad"), "{}", miss.text);
     assert!(miss.text.contains("--> x.rs:1:1"), "{}", miss.text);
     assert_eq!(miss.text.matches("full: ~").count(), 1, "{}", miss.text);

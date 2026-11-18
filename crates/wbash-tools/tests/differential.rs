@@ -127,7 +127,7 @@ fn run_parse_miss_preserves_raw_tail_and_single_full_handle() {
         "d",
     );
     assert!(!r.ok, "{}", r.text);
-    assert!(r.text.contains("# parse_miss raw_tail"), "{}", r.text);
+    assert!(r.text.contains("# parse_miss"), "{}", r.text);
     assert!(r.text.contains("error: kaboom"), "{}", r.text);
     assert!(r.text.contains("--> src/lib.rs:1:2"), "{}", r.text);
     let full_count = r.text.matches("full: ~").count();

@@ -133,7 +133,7 @@ impl Tool for CheckTool {
                         }
                     }
                 } else {
-                    result.note(format!("{label} parse_miss raw_tail"));
+                    result.note(format!("{label} parse_miss"));
                     let raw = run.output.combined();
                     util::compact_tail(&mut result, &raw, label, ctx.handles, true)?;
                 }
@@ -142,7 +142,7 @@ impl Tool for CheckTool {
                     result.note(format!("{label}: ok"));
                 }
             } else {
-                result.note(format!("{label} parse_miss raw_tail"));
+                result.note(format!("{label} parse_miss"));
                 let raw = run.output.combined();
                 util::compact_tail(&mut result, &raw, label, ctx.handles, true)?;
             }
