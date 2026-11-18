@@ -270,9 +270,9 @@ pub fn counts_of(tests: &[TestResult]) -> (usize, usize, usize) {
     (passed, failed, skipped)
 }
 
-/// Keep only libtest failure evidence: failing test blocks, the failures list,
-/// failed suite result lines, and the terminal cargo error. Passing suites,
-/// progress dots, and warning bodies are intentionally omitted.
+/// Keep only failure evidence: failing test blocks, failures list,
+/// failed suite result lines, and terminal error. Passing suites,
+/// progress dots, and noise are omitted.
 pub fn compact_test_failures(
     result: &mut ToolResult,
     raw: &str,
@@ -310,10 +310,18 @@ pub fn compact_test_failures(
             if t.is_empty() {
                 continue;
             }
+            if in_block
+                && (t.starts_with("note: run with `RUST_BACKTRACE")
+                    || t.starts_with("note: Some details are omitted"))
+            {
+                continue;
+            }
             selected.push(line.clone());
             continue;
         }
-        if t.starts_with("error: test failed") {
+        if t.starts_with("error: test failed")
+            || t.starts_with("error: process didn't exit successfully")
+        {
             selected.push(line);
         }
     }

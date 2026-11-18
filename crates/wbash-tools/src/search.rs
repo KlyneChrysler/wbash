@@ -257,9 +257,9 @@ impl Tool for SearchTool {
         {
             if let Some(h) = hits.first() {
                 let line = format!("{}:{}: {}", h.path, h.line, h.snippet);
-                result.header = line.clone();
-                result.raw_text = Some(format!("{line}\n"));
+                result.header = line;
                 result.items.clear();
+                return Ok(result);
             }
         }
         if a.mode == "symbol" && fallback {
