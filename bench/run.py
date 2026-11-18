@@ -31,7 +31,17 @@ except Exception:
     _ENC = None
 
 
+import re as _re
+
+_DUR_RE = _re.compile(r", \d+(?:\.\d+)?(?:ms|s|m)\b")
+
+
+def normalize_output_for_tokens(out: str) -> str:
+    return _DUR_RE.sub("", out)
+
+
 def count_tokens(cmd: str, out: str) -> tuple[int, int]:
+    out = normalize_output_for_tokens(out)
     est = (len(cmd) + len(out)) // 4
     if _ENC is not None:
         try:

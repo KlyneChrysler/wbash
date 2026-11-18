@@ -10,6 +10,4 @@ bash:
   - "grep -rn old_name src tests"
   - "perl -pi -e \"s/old_name/combine/g\" src/lib.rs tests/basic.rs"
 w:
-  - "w search old_name src tests"
-  - "w edit src/lib.rs find=\"old_name\" replace=\"combine\""
-  - "w edit tests/basic.rs find=\"old_name\" replace=\"combine\""
+  - "w replace old_name combine"

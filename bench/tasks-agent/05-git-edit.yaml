@@ -1,0 +1,22 @@
+id: agent_git_edit
+kind: agent
+prompt: "Inspect diff, make a change, and summarize."
+fixture: "fixtures/git_repo"
+setup:
+  - "git init -q"
+  - "git config user.email bench@example.com"
+  - "git config user.name bench"
+  - "git add ."
+  - "git commit -qm base"
+  - "cp variants/diff1.rs src/lib.rs"
+expect:
+  - "goodbye"
+check: "grep -q goodbye src/lib.rs"
+bash:
+  - "git diff"
+  - "perl -0pi -e \"s/farewell/goodbye/g\" src/lib.rs"
+  - "git diff"
+w:
+  - "w git diff"
+  - "w replace farewell goodbye src/lib.rs"
+  - "w git diff"

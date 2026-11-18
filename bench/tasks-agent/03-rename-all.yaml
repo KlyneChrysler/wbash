@@ -1,0 +1,15 @@
+id: agent_rename_all
+kind: agent
+prompt: "Rename old_name to total across the crate and verify."
+fixture: "fixtures/rust_calc"
+setup:
+  - "cp variants/rename_add.rs src/lib.rs"
+  - "cp variants/rename_tests.rs tests/basic.rs"
+check: "cargo test -q"
+bash:
+  - "grep -rn old_name src tests"
+  - "perl -pi -e \"s/old_name/total/g\" src/lib.rs tests/basic.rs"
+  - "cargo test -q"
+w:
+  - "w replace old_name total"
+  - "w --tier execute run -- cargo test -q"

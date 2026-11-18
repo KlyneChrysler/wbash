@@ -1,0 +1,247 @@
+{
+  "generated_at": "2026-11-18T12:08:13Z",
+  "tokenizer": "cl100k_base",
+  "summary": {
+    "bash": {
+      "tasks": 6,
+      "passed": 6,
+      "tokens_est": 1228,
+      "tokens_cl100k": 1724,
+      "steps": 19,
+      "wall_ms": 10362,
+      "by_kind": {
+        "agent": {
+          "tasks": 6,
+          "passed": 6,
+          "tokens_est": 1228,
+          "tokens_cl100k": 1724,
+          "steps": 19
+        }
+      }
+    },
+    "w": {
+      "tasks": 6,
+      "passed": 6,
+      "tokens_est": 663,
+      "tokens_cl100k": 938,
+      "steps": 18,
+      "wall_ms": 8863,
+      "by_kind": {
+        "agent": {
+          "tasks": 6,
+          "passed": 6,
+          "tokens_est": 663,
+          "tokens_cl100k": 938,
+          "steps": 18
+        }
+      }
+    }
+  },
+  "results": [
+    {
+      "task": "agent_fix_test",
+      "kind": "agent",
+      "runner": "bash",
+      "ok": true,
+      "steps": 4,
+      "step_exit_codes": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 376,
+      "tokens_cl100k": 550,
+      "wall_ms": 3299
+    },
+    {
+      "task": "agent_fix_test",
+      "kind": "agent",
+      "runner": "w",
+      "ok": true,
+      "steps": 4,
+      "step_exit_codes": [
+        101,
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 217,
+      "tokens_cl100k": 341,
+      "wall_ms": 2255
+    },
+    {
+      "task": "agent_fix_type",
+      "kind": "agent",
+      "runner": "bash",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 215,
+      "tokens_cl100k": 292,
+      "wall_ms": 1831
+    },
+    {
+      "task": "agent_fix_type",
+      "kind": "agent",
+      "runner": "w",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        101,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 59,
+      "tokens_cl100k": 85,
+      "wall_ms": 2504
+    },
+    {
+      "task": "agent_rename_all",
+      "kind": "agent",
+      "runner": "bash",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 135,
+      "tokens_cl100k": 197,
+      "wall_ms": 1214
+    },
+    {
+      "task": "agent_rename_all",
+      "kind": "agent",
+      "runner": "w",
+      "ok": true,
+      "steps": 2,
+      "step_exit_codes": [
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 49,
+      "tokens_cl100k": 63,
+      "wall_ms": 1153
+    },
+    {
+      "task": "agent_clippy_fix",
+      "kind": "agent",
+      "runner": "bash",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 129,
+      "tokens_cl100k": 166,
+      "wall_ms": 532
+    },
+    {
+      "task": "agent_clippy_fix",
+      "kind": "agent",
+      "runner": "w",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        101,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 107,
+      "tokens_cl100k": 131,
+      "wall_ms": 387
+    },
+    {
+      "task": "agent_git_edit",
+      "kind": "agent",
+      "runner": "bash",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 146,
+      "tokens_cl100k": 210,
+      "wall_ms": 96
+    },
+    {
+      "task": "agent_git_edit",
+      "kind": "agent",
+      "runner": "w",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 90,
+      "tokens_cl100k": 128,
+      "wall_ms": 160
+    },
+    {
+      "task": "agent_parse_fix",
+      "kind": "agent",
+      "runner": "bash",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 227,
+      "tokens_cl100k": 309,
+      "wall_ms": 3390
+    },
+    {
+      "task": "agent_parse_fix",
+      "kind": "agent",
+      "runner": "w",
+      "ok": true,
+      "steps": 3,
+      "step_exit_codes": [
+        101,
+        0,
+        0
+      ],
+      "check_exit": 0,
+      "missing_expect": [],
+      "tokens_est": 141,
+      "tokens_cl100k": 190,
+      "wall_ms": 2404
+    }
+  ]
+}

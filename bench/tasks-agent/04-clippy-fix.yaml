@@ -1,0 +1,15 @@
+id: agent_clippy_fix
+kind: agent
+prompt: "Fix clippy warnings and verify."
+fixture: "fixtures/rust_calc"
+setup:
+  - "cp variants/lint_unused.rs src/lib.rs"
+check: "cargo clippy -q -- -D warnings"
+bash:
+  - "cargo clippy -q -- -D warnings 2>&1 | tail -30 || true"
+  - "perl -0pi -e \"s/\\Qlet unused = 1;\\E/let _unused = 1;/\" src/lib.rs"
+  - "cargo clippy -q -- -D warnings"
+w:
+  - "w --tier execute run -- cargo clippy -q -- -D warnings"
+  - "w edit src/lib.rs find=\"let unused = 1;\" replace=\"let _unused = 1;\""
+  - "w --tier execute run -- cargo clippy -q -- -D warnings"

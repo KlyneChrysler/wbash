@@ -1,0 +1,15 @@
+id: agent_fix_type
+kind: agent
+prompt: "Fix the compile error and verify."
+fixture: "fixtures/rust_calc"
+setup:
+  - "cp variants/type_mismatch.rs src/lib.rs"
+check: "cargo test -q"
+bash:
+  - "cargo test -q 2>&1 | tail -20 || true"
+  - "perl -0pi -e 's/\\Q\"a + b\"\\E/a + b/' src/lib.rs"
+  - "cargo test -q"
+w:
+  - "w --tier execute run -- cargo test -q"
+  - "w edit src/lib.rs find=\"\\\"a + b\\\"\" replace=\"a + b\""
+  - "w --tier execute run -- cargo test -q"
