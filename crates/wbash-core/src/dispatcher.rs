@@ -134,6 +134,10 @@ impl Dispatcher {
         self.ensure_session(session_id)?;
         let budget = common.budget.unwrap_or_else(|| default_budget(tool));
         let key = session_id.to_string();
+        let ledger_before = self
+            .sessions
+            .get(&key)
+            .and_then(|s| serde_json::to_vec(&s.ledger).ok());
 
         let result = {
             let session = self.sessions.get_mut(&key).expect("session");
@@ -182,17 +186,16 @@ impl Dispatcher {
         stats::record_result(&self.config, &result, rendered.out_tokens);
         stats::audit(&self.config, tool, result.meta.ok, None);
 
-        let saved = if let Some(session) = self.sessions.get_mut(&key) {
+        if let Some(session) = self.sessions.get_mut(&key) {
             session.last_seen_ms = now_ms();
             session
                 .ledger
                 .expire(self.config.session.ledger_ttl_secs, now_ms());
-            Some(session.ledger.clone())
-        } else {
-            None
-        };
-        if let Some(ledger) = saved {
-            self.save_ledger(session_id, &ledger);
+            if let Ok(after) = serde_json::to_vec(&session.ledger) {
+                if ledger_before.as_deref() != Some(after.as_slice()) {
+                    self.save_ledger_bytes(session_id, &after);
+                }
+            }
         }
         self.prune_sessions();
         Ok(rendered)
@@ -242,16 +245,13 @@ impl Dispatcher {
         ledger
     }
 
-    fn save_ledger(&self, session_id: &str, ledger: &Ledger) {
+    fn save_ledger_bytes(&self, session_id: &str, text: &[u8]) {
         let path = self.ledger_file(session_id);
         if let Some(parent) = path.parent() {
             if paths::ensure_private_dir(parent).is_err() {
                 return;
             }
         }
-        let Ok(text) = serde_json::to_vec(ledger) else {
-            return;
-        };
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
@@ -268,8 +268,7 @@ impl Dispatcher {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
             }
-            f.write_all(&text)?;
-            f.sync_all()?;
+            f.write_all(text)?;
             Ok(())
         };
         if write().is_ok() {

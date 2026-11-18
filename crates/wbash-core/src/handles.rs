@@ -12,6 +12,7 @@ use crate::types::{now_ms, HandleRecord, HandleRef};
 pub struct HandleStore {
     dir: PathBuf,
     manifest: PathBuf,
+    manifest_size: u64,
     handles: BTreeMap<String, HandleRecord>,
     next: u64,
     ttl_secs: u64,
@@ -51,6 +52,7 @@ impl HandleStore {
         let mut store = Self {
             dir: base,
             manifest,
+            manifest_size: 0,
             handles: BTreeMap::new(),
             next: 1,
             ttl_secs,
@@ -66,7 +68,7 @@ impl HandleStore {
 
     pub fn put(&mut self, kind: &str, bytes: &[u8], content_type: &str) -> Result<HandleRef> {
         let _lock = self.lock(true)?;
-        self.reload_manifest()?;
+        self.reload_manifest_if_changed()?;
         let (stored, redacted, ctype) = if content_type == "text" {
             let text = String::from_utf8_lossy(bytes);
             let (red, n) = self.redactor.redact(&text);
@@ -90,8 +92,7 @@ impl HandleStore {
             content_type: ctype,
         };
         let blob = self.blob_path(&id);
-        write_private_atomic(&blob, &stored)?;
-        append_manifest_line(&self.manifest, &rec)?;
+        write_cache_atomic(&blob, &stored)?;
         let out = HandleRef {
             id: id.clone(),
             kind: rec.kind.clone(),
@@ -99,6 +100,7 @@ impl HandleStore {
             hash: rec.hash.clone(),
         };
         self.handles.insert(id, rec);
+        self.rewrite_manifest_locked()?;
         self.evict_if_needed_locked()?;
         Ok(out)
     }
@@ -242,9 +244,23 @@ impl HandleStore {
         Ok(FlockGuard { fd: f })
     }
 
+    fn reload_manifest_if_changed(&mut self) -> Result<()> {
+        let size = std::fs::metadata(&self.manifest)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        if size != self.manifest_size || self.handles.is_empty() {
+            self.reload_manifest()?;
+        }
+        Ok(())
+    }
+
     fn reload_manifest(&mut self) -> Result<()> {
         let mut handles = BTreeMap::new();
         let mut next = self.next.max(1);
+        let mut size = 0u64;
+        if let Ok(meta) = std::fs::metadata(&self.manifest) {
+            size = meta.len();
+        }
         if let Ok(text) = std::fs::read_to_string(&self.manifest) {
             for line in text.lines() {
                 if let Ok(rec) = serde_json::from_str::<HandleRecord>(line) {
@@ -253,12 +269,13 @@ impl HandleStore {
                 }
             }
         }
+        self.manifest_size = size;
         self.handles = handles;
         self.next = next;
         Ok(())
     }
 
-    fn rewrite_manifest_locked(&self) -> Result<()> {
+    fn rewrite_manifest_locked(&mut self) -> Result<()> {
         let mut text = String::new();
         for rec in self.handles.values() {
             if let Ok(line) = serde_json::to_string(rec) {
@@ -266,40 +283,13 @@ impl HandleStore {
                 text.push('\n');
             }
         }
-        write_private_atomic(&self.manifest, text.as_bytes())
+        write_cache_atomic(&self.manifest, text.as_bytes())?;
+        self.manifest_size = text.len() as u64;
+        Ok(())
     }
 }
 
-fn append_manifest_line(path: &Path, rec: &HandleRecord) -> Result<()> {
-    use std::io::Write;
-    let line =
-        serde_json::to_string(rec).map_err(|e| WErr::internal(format!("manifest json: {e}")))?;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|e| {
-            WErr::new(
-                "permission_denied",
-                format!("manifest {}: {e}", path.display()),
-            )
-        })?;
-    writeln!(f, "{line}").map_err(|e| {
-        WErr::new(
-            "permission_denied",
-            format!("manifest {}: {e}", path.display()),
-        )
-    })?;
-    f.sync_all().ok();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
-}
-
-fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+fn write_cache_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| WErr::internal(format!("path {} has no parent", path.display())))?;
@@ -325,7 +315,6 @@ fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
             let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
         }
         f.write_all(bytes)?;
-        f.sync_all()?;
         Ok(())
     })();
     if let Err(e) = res {
@@ -341,9 +330,6 @@ fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
             "permission_denied",
             format!("rename {}: {e}", path.display()),
         ));
-    }
-    if let Ok(dir) = std::fs::File::open(parent) {
-        let _ = dir.sync_all();
     }
     Ok(())
 }

@@ -102,35 +102,17 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
     }
 
     let mut dropped_lines: Vec<String> = Vec::new();
-    let emit_dropped = |out: &mut Vec<String>,
-                        dropped: &mut Vec<String>,
-                        handles: &mut HandleStore,
-                        redactor: &Redactor,
-                        redactions: &mut u32|
-     -> Result<()> {
-        if dropped.is_empty() {
-            return Ok(());
-        }
-        let n = dropped.len();
-        let joined = dropped.join("\n");
-        let href = handles.put("elide", joined.as_bytes(), "text")?;
-        let _ = redactor;
-        out.push(format!("...+{n} lines ({})", href.id));
-        *redactions += 0;
-        dropped.clear();
-        Ok(())
-    };
+    let mut gaps: Vec<(usize, usize)> = Vec::new(); // (index in out, count)
 
     let mut body_from_items = false;
     for (idx, item) in result.items.iter().enumerate() {
         if included[idx] || item.class == ItemClass::MustKeep {
-            emit_dropped(
-                &mut out,
-                &mut dropped_lines,
-                opts.handles,
-                opts.redactor,
-                &mut redactions,
-            )?;
+            if !dropped_lines.is_empty() {
+                let n = dropped_lines.len();
+                gaps.push((out.len(), n));
+                out.push(String::new());
+                dropped_lines.clear();
+            }
             for line in &item.lines {
                 let (red, n) = opts.redactor.redact(line);
                 redactions += n;
@@ -141,13 +123,26 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
             dropped_lines.extend(item.lines.iter().cloned());
         }
     }
-    emit_dropped(
-        &mut out,
-        &mut dropped_lines,
-        opts.handles,
-        opts.redactor,
-        &mut redactions,
-    )?;
+    if !dropped_lines.is_empty() {
+        let n = dropped_lines.len();
+        gaps.push((out.len(), n));
+        out.push(String::new());
+        dropped_lines.clear();
+    }
+
+    if !gaps.is_empty() {
+        let mut all_dropped: Vec<String> = Vec::new();
+        for (idx, item) in result.items.iter().enumerate() {
+            if !(included[idx] || item.class == ItemClass::MustKeep) {
+                all_dropped.extend(item.lines.iter().cloned());
+            }
+        }
+        let joined = all_dropped.join("\n");
+        let href = opts.handles.put("elide", joined.as_bytes(), "text")?;
+        for (i, n) in gaps {
+            out[i] = format!("...+{n} lines ({})", href.id);
+        }
+    }
 
     let build_text = |out: &Vec<String>| -> String {
         let mut text = out.join("\n");
@@ -164,7 +159,11 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
             .keys()
             .any(|k| !matches!(k.as_str(), "raw_bytes" | "duration_ms"))
         && !result.meta.notes.iter().any(|n| n.contains("parse_miss"));
-    let no_omissions = dropped_lines.is_empty();
+    let no_omissions = result
+        .items
+        .iter()
+        .enumerate()
+        .all(|(idx, item)| included[idx] || item.class == ItemClass::MustKeep);
     if unstructured && no_omissions {
         if let Some(raw) = result.raw_text.as_deref() {
             let raw_trim = raw.trim_end_matches(['\n', '\r']);
