@@ -1,16 +1,8 @@
 # w-bash
 
-A token-efficient, agent-native workspace tool for AI coding agents.
+`w-bash` is a command-line tool for AI coding agents. Its main purpose is to run common coding tasks—listing files, searching code, reading and editing files, running commands and tests, and git operations—and return shorter, structured output instead of the full raw output.
 
-`w-bash` gives agents compact, structured operations for exploring code, reading/editing files, running commands, and inspecting git state—while preserving the important details (errors, failing tests, locations, and recoverable full output via handles).
-
-## Why
-
-Raw shell output is noisy: progress bars, long logs, repeated warnings, and huge file dumps burn context and hide the signal. `w-bash` normalizes and compacts tool output so agents can:
-
-- see the relevant result first (errors, matches, diffs, summaries),
-- stay within a token budget,
-- recover full context losslessly with `expand` handles when needed.
+When output is shortened, the full result is saved and can be retrieved later with `expand`. Errors, failing tests, file locations, and exit status are kept in the output.
 
 ## Features
 
