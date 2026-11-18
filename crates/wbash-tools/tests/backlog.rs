@@ -1,5 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, MutexGuard};
 
 use serde_json::json;
 use wbash_core::config::Config;
@@ -8,16 +9,18 @@ use wbash_core::formatter::Rendered;
 use wbash_parsers::ParserRegistry;
 
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static NEXT: AtomicU64 = AtomicU64::new(0);
 
-fn setup() -> (PathBuf, Dispatcher) {
-    let root = std::env::temp_dir().join(format!("wbash-backlog-{}", std::process::id()));
+fn setup() -> (PathBuf, Dispatcher, MutexGuard<'static, ()>) {
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("wbash-backlog-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let cache = root.with_extension("cache");
     let _ = std::fs::remove_dir_all(&cache);
     let config_home = root.with_extension("config");
     let _ = std::fs::remove_dir_all(&config_home);
-    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("XDG_CACHE_HOME", &cache);
     std::env::set_var("XDG_CONFIG_HOME", &config_home);
     let mut cfg = Config::default();
@@ -25,7 +28,7 @@ fn setup() -> (PathBuf, Dispatcher) {
     let registry = Arc::new(wbash_tools::registry());
     let parsers = Arc::new(ParserRegistry::new());
     let dispatcher = Dispatcher::new(cfg, &root, registry, parsers).unwrap();
-    (root, dispatcher)
+    (root, dispatcher, guard)
 }
 
 fn call(d: &mut Dispatcher, tool: &str, args: serde_json::Value) -> Rendered {
@@ -46,7 +49,7 @@ fn handle_ids(text: &str) -> Vec<String> {
 
 #[test]
 fn lossless_expand_recovers_elided_read_lines() {
-    let (root, mut d) = setup();
+    let (root, mut d, _g) = setup();
     let lines: Vec<String> = (1..=600).map(|i| format!("line {i} value")).collect();
     let content = lines.join("\n") + "\n";
     std::fs::write(root.join("big.txt"), &content).unwrap();
@@ -88,7 +91,7 @@ fn lossless_expand_recovers_elided_read_lines() {
 
 #[test]
 fn edge_case_files_crlf_long_and_boundaries() {
-    let (root, mut d) = setup();
+    let (root, mut d, _g) = setup();
     std::fs::write(root.join("crlf.txt"), "a\r\nb\r\nc\r\n").unwrap();
     let r = call(&mut d, "read", json!({"path":"crlf.txt"}));
     assert!(
@@ -118,7 +121,7 @@ fn edge_case_files_crlf_long_and_boundaries() {
 
 #[test]
 fn repeated_reads_unchanged_and_force() {
-    let (root, mut d) = setup();
+    let (root, mut d, _g) = setup();
     std::fs::write(root.join("f.txt"), "one\n").unwrap();
     let r1 = call(&mut d, "read", json!({"path":"f.txt"}));
     assert!(r1.ok && r1.text.contains("1: one"), "{}", r1.text);

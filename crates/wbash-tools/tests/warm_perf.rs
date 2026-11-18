@@ -76,7 +76,7 @@ fn warm_read_and_search_perf() {
     let search_limit: f64 = std::env::var("WBASH_WARM_SEARCH_P95_MS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(50.0);
+        .unwrap_or(25.0);
     eprintln!(
         "warm read p95={rp95:.2}ms search p95={sp95:.2}ms files~{} limits=<{read_limit}/{search_limit}ms",
         dirs * per_dir

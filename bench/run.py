@@ -80,9 +80,10 @@ def parse_yaml(path: Path) -> dict:
     return task
 
 
-def load_tasks(pattern: str | None) -> list[dict]:
+def load_tasks(pattern: str | None, tasks_dir: Path | None = None) -> list[dict]:
+    base = tasks_dir or (BENCH / "tasks")
     tasks = []
-    for path in sorted((BENCH / "tasks").glob("*.yaml")):
+    for path in sorted(base.glob("*.yaml")):
         task = parse_yaml(path)
         task["_path"] = str(path)
         if pattern and pattern not in task["id"]:
@@ -181,15 +182,19 @@ def main() -> int:
     ap.add_argument("--runners", default="bash,w")
     ap.add_argument("--runner", choices=["bash", "w"])
     ap.add_argument("--task", default=None)
+    ap.add_argument("--tasks-dir", default=None)
     ap.add_argument("--w-bin", default=None)
     ap.add_argument("--timeout", type=int, default=180)
     ap.add_argument("--save-baseline", default=None)
+    ap.add_argument("--baseline", default=None)
+    ap.add_argument("--max-regress-pct", type=float, default=None)
     ap.add_argument("--json", default=None)
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
-    tasks = load_tasks(args.task)
+    tasks_dir = Path(args.tasks_dir) if args.tasks_dir else None
+    tasks = load_tasks(args.task, tasks_dir)
     if args.list:
         for t in tasks:
             print(f"{t['id']:<24} {t.get('kind','')}")
@@ -269,6 +274,33 @@ def main() -> int:
         out = Path(args.json)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, indent=2) + "\n")
+
+    if args.baseline and args.max_regress_pct is not None:
+        base = json.loads(Path(args.baseline).read_text())
+        base_w = base.get("summary", {}).get("w", {})
+        cur_w = summary.get("w", {})
+        base_total = base_w.get("tokens_cl100k")
+        cur_total = cur_w.get("tokens_cl100k")
+        if base_total and cur_total:
+            delta = 100.0 * (cur_total - base_total) / base_total
+            print(f"  baseline regression w cl100k: {delta:+.1f}% (max {args.max_regress_pct:+.1f}%)")
+            if delta > args.max_regress_pct:
+                print("  FAIL: token regression above threshold", file=sys.stderr)
+                return 1
+        base_by_id = {r["task"]: r for r in base.get("results", []) if r.get("runner") == "w"}
+        for r in results:
+            if r.get("runner") != "w":
+                continue
+            b = base_by_id.get(r["task"])
+            if not b:
+                continue
+            bt = b.get("tokens_cl100k") or b.get("tokens_est") or 0
+            ct = r.get("tokens_cl100k") or r.get("tokens_est") or 0
+            if bt > 0:
+                d = 100.0 * (ct - bt) / bt
+                if d > args.max_regress_pct:
+                    print(f"  FAIL: {r['task']} {d:+.1f}% vs baseline", file=sys.stderr)
+                    return 1
 
     return 0 if all(r["ok"] for r in results) else 1
 

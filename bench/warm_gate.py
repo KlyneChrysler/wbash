@@ -19,8 +19,8 @@ def main():
     ]
     env = os.environ.copy()
     env["WBASH_PERF_FILES"] = str(files)
-    env.setdefault("WBASH_WARM_READ_P95_MS", "10.0")
-    env.setdefault("WBASH_WARM_SEARCH_P95_MS", "50.0")
+    env.setdefault("WBASH_WARM_READ_P95_MS", "5.0")
+    env.setdefault("WBASH_WARM_SEARCH_P95_MS", "25.0")
     p = subprocess.run(cmd, env=env)
     return p.returncode
 
