@@ -35,6 +35,8 @@ fn golden_wire_outputs() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     copy_fixture(&root);
+    let bigtext: String = (1..=120).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(root.join("big.txt"), bigtext).unwrap();
     let cache = root.with_extension("cache");
     let config_home = root.with_extension("config");
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
