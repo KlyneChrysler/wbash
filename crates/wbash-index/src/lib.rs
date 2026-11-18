@@ -159,23 +159,17 @@ impl Workspace {
 
     /// Read text preferring in-memory/disk-backed content cache.
     pub fn read_cached_text(&self, entry: &FileEntry) -> std::io::Result<TextFile> {
-        let meta = std::fs::metadata(&entry.abs)?;
-        let mtime_ms = mtime_ms(&meta);
-        let size = meta.len();
-        if mtime_ms != entry.mtime_ms || size != entry.size {
-            self.invalidate();
-        }
-        if let Some(t) = self.cached_text(&entry.rel, size, mtime_ms) {
+        if let Some(t) = self.cached_text(&entry.rel, entry.size, entry.mtime_ms) {
             return Ok(TextFile {
                 content: t,
                 binary: false,
-                size,
+                size: entry.size,
                 encoding: Some(TextEncoding::Utf8),
             });
         }
         let tf = read_text(&entry.abs)?;
         if !tf.binary {
-            self.store_content(&entry.rel, size, mtime_ms, tf.content.clone());
+            self.store_content(&entry.rel, entry.size, entry.mtime_ms, tf.content.clone());
         }
         Ok(tf)
     }
