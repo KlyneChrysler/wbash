@@ -40,7 +40,7 @@ impl McpServer {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": false}},
                 "serverInfo": {"name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION")},
-                "instructions": "Use w-bash tools for compact, deterministic workspace operations."
+                "instructions": "Use w-bash tools for workspace operations. Results are compact to reduce token use; use expand with a handle to retrieve full output when needed."
             })),
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({"tools": self.dispatcher.registry().mcp_tools()})),

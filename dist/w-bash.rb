@@ -1,5 +1,5 @@
 class WBash < Formula
-  desc "Token-efficient agent shell (w) with compact, verifiable tool output"
+  desc "Workspace tool for AI agents with compact, low-token output"
   homepage "https://github.com/KlyneChrysler/wbash"
   version "0.1.0"
   license "MIT"

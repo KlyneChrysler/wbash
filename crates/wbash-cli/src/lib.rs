@@ -795,7 +795,7 @@ fn cmd_config(tokens: &[String], global: &Global) -> Result<i32> {
 
 fn print_help() {
     println!(
-        "w - agent-native workspace tool server ({})",
+        "w - workspace tool for AI agents ({})",
         env!("CARGO_PKG_VERSION")
     );
     println!(

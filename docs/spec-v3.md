@@ -11,7 +11,7 @@ This document is the normative source for v0.1 implementation, testing, packagin
 
 ## 0. Product definition
 
-**w bash** is a local, agent-native tool server and CLI that performs workspace, execution, and VCS operations and returns compact, deterministic, lossless-by-reference results optimized for LLM context efficiency.
+**w bash** is a local tool server and CLI for AI agents (in developer tools or inside systems). It performs workspace, execution, and VCS operations and returns compact, deterministic results so agents use fewer tokens while keeping important details and access to full output by reference.
 
 | Surface | Identifier | Notes |
 |---|---|---|
