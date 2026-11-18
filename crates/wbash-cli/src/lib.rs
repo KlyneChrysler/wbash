@@ -254,11 +254,28 @@ fn parse_global(argv: &[String]) -> Result<(Global, Option<String>, Vec<String>)
                 ));
             }
             _ => {
-                return Ok((g, Some(a.clone()), argv[i + 1..].to_vec()));
+                return Ok((g, Some(canonical_tool(a)), argv[i + 1..].to_vec()));
             }
         }
     }
     Ok((g, None, Vec::new()))
+}
+
+fn canonical_tool(name: &str) -> String {
+    match name {
+        "r" => "read",
+        "s" => "search",
+        "e" => "edit",
+        "t" => "tree",
+        "x" => "expand",
+        "g" => "git",
+        "b" => "batch",
+        "u" => "run",
+        "c" => "check",
+        "p" => "replace",
+        _ => name,
+    }
+    .to_string()
 }
 
 fn next(argv: &[String], i: &mut usize, flag: &str) -> Result<String> {
@@ -485,12 +502,30 @@ fn fill_positionals(tool: &str, obj: &mut Map<String, Value>, pos: &[String]) ->
             if let Some(p) = pos.first() {
                 put("path", p);
             }
+            if tool == "read" {
+                for p in pos.iter().skip(1) {
+                    if p.contains(':') && p.chars().all(|c| c.is_ascii_digit() || c == ':') {
+                        put("lines", p);
+                    }
+                }
+            }
         }
         "search" => {
             if let Some(p) = pos.first() {
                 put("pattern", p);
             }
             if let Some(p) = pos.get(1) {
+                put("path", p);
+            }
+        }
+        "replace" => {
+            if let Some(p) = pos.first() {
+                put("find", p);
+            }
+            if let Some(p) = pos.get(1) {
+                put("replace", p);
+            }
+            if let Some(p) = pos.get(2) {
                 put("path", p);
             }
         }
@@ -830,12 +865,14 @@ fn print_help() {
         "usage: w [--root DIR] [--session ID] [--format lean|json] [--budget N] <tool> [opts]"
     );
     println!();
-    println!("tools: tree read search edit run check git expand batch sh");
+    println!(
+        "tools: tree(t) read(r) search(s) edit(e) run(u) check(c) git(g) expand(x) batch(b) sh"
+    );
     println!("utility: gain discover config handles parser");
     println!();
     println!("examples:");
     println!("  w tree src --depth 2");
-    println!("  w read src/main.rs --lines 1:40");
+    println!("  w read src/main.rs 1:40");
     println!("  w search parse_config src");
     println!("  w run -- cargo test");
     println!("  w git diff --staged");
