@@ -99,8 +99,8 @@ impl HandleStore {
             bytes: rec.bytes,
             hash: rec.hash.clone(),
         };
+        self.append_record_locked(&rec)?;
         self.handles.insert(id, rec);
-        self.rewrite_manifest_locked()?;
         self.evict_if_needed_locked()?;
         Ok(out)
     }
@@ -263,6 +263,9 @@ impl HandleStore {
         }
         if let Ok(text) = std::fs::read_to_string(&self.manifest) {
             for line in text.lines() {
+                if line.trim().is_empty() {
+                    continue;
+                }
                 if let Ok(rec) = serde_json::from_str::<HandleRecord>(line) {
                     next = next.max(parse_id(&rec.id).map(|n| n + 1).unwrap_or(1));
                     handles.insert(rec.id.clone(), rec);
@@ -272,6 +275,42 @@ impl HandleStore {
         self.manifest_size = size;
         self.handles = handles;
         self.next = next;
+        Ok(())
+    }
+
+    fn append_record_locked(&mut self, rec: &HandleRecord) -> Result<()> {
+        let mut line = serde_json::to_string(rec).map_err(|e| WErr::internal(e.to_string()))?;
+        line.push('\n');
+        let bytes = line.as_bytes();
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.manifest)
+            .map_err(|e| {
+                WErr::new(
+                    "permission_denied",
+                    format!("append {}: {e}", self.manifest.display()),
+                )
+            })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        if self.manifest_size > 0 {
+            if let Ok(mut rf) = std::fs::File::open(&self.manifest) {
+                use std::io::{Read, Seek, SeekFrom};
+                if rf.seek(SeekFrom::End(-1)).is_ok() {
+                    let mut b = [0u8; 1];
+                    if rf.read_exact(&mut b).is_ok() && b[0] != b'\n' {
+                        f.write_all(b"\n")?;
+                        self.manifest_size += 1;
+                    }
+                }
+            }
+        }
+        f.write_all(bytes)?;
+        self.manifest_size += bytes.len() as u64;
         Ok(())
     }
 
