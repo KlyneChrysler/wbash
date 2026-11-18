@@ -251,7 +251,7 @@ fn detect_commands(project: &Path, kind: &str) -> Result<Vec<(String, Vec<String
     let s = |parts: &[&str]| parts.iter().map(|p| p.to_string()).collect::<Vec<_>>();
 
     if project.join("Cargo.toml").exists() {
-        if want("build") || want("types") {
+        if (want("build") || want("types")) && kind != "all" {
             out.push(("cargo check".to_string(), s(&["cargo", "check"])));
         }
         if want("lint") {
@@ -266,13 +266,15 @@ fn detect_commands(project: &Path, kind: &str) -> Result<Vec<(String, Vec<String
     }
 
     if project.join("go.mod").exists() {
-        if want("build") || want("types") {
+        let lint = want("lint");
+        let test = want("test");
+        if (want("build") || want("types")) && !(kind == "all" && (lint || test)) {
             out.push(("go build".to_string(), s(&["go", "build", "./..."])));
         }
-        if want("lint") {
+        if lint {
             out.push(("go vet".to_string(), s(&["go", "vet", "./..."])));
         }
-        if want("test") {
+        if test {
             out.push(("go test".to_string(), s(&["go", "test", "./..."])));
         }
     }
@@ -364,4 +366,36 @@ fn find_executable(name: &str, project: &Path) -> Option<String> {
 
 pub fn register(out: &mut Vec<std::sync::Arc<dyn Tool>>) {
     out.push(std::sync::Arc::new(CheckTool));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detect_commands;
+
+    #[test]
+    fn rust_all_skips_redundant_check() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"x\"").unwrap();
+        let cmds = detect_commands(dir.path(), "all").unwrap();
+        let labels: Vec<_> = cmds.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(labels, vec!["cargo clippy", "cargo test"]);
+    }
+
+    #[test]
+    fn rust_types_runs_check() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"x\"").unwrap();
+        let cmds = detect_commands(dir.path(), "types").unwrap();
+        let labels: Vec<_> = cmds.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(labels, vec!["cargo check"]);
+    }
+
+    #[test]
+    fn go_all_skips_redundant_build() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("go.mod"), "module x\ngo 1.22\n").unwrap();
+        let cmds = detect_commands(dir.path(), "all").unwrap();
+        let labels: Vec<_> = cmds.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(labels, vec!["go vet", "go test"]);
+    }
 }
