@@ -163,4 +163,4 @@ git push origin <branch>
 
 ## License
 
-Apache-2.0
+MIT

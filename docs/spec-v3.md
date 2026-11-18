@@ -27,7 +27,7 @@ This document is the normative source for v0.1 implementation, testing, packagin
 | Content hash display | `b3:<16hex>` | BLAKE3, full hash stored internally |
 
 **Supported platforms (v0.1):** Linux x86_64/aarch64, macOS x86_64/aarch64. Windows: WSL supported; native Windows best-effort/deferred (no v0.1 gate).  
-**License:** Apache-2.0.
+**License:** MIT.
 
 ---
 
@@ -623,7 +623,7 @@ bench/baselines/...
 | Decision | Resolution |
 |---|---|
 | Product/CLI/MCP naming | `w bash` / `w` / `w-bash` / `wbash-*` |
-| License | Apache-2.0 |
+| License | MIT |
 | Primary transport | MCP stdio (v0.1); HTTP deferred |
 | Platforms | Linux/macOS; Windows via WSL |
 | Symbol languages | Rust, TypeScript/TSX, Python, Go |

@@ -2,7 +2,7 @@ class WBash < Formula
   desc "Token-efficient agent shell (w) with compact, verifiable tool output"
   homepage "https://github.com/KlyneChrysler/wbash"
   version "0.1.0"
-  license "Apache-2.0"
+  license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
