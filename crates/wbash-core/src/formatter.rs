@@ -164,6 +164,7 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
         .iter()
         .enumerate()
         .all(|(idx, item)| included[idx] || item.class == ItemClass::MustKeep);
+    let has_must_body = result.items.iter().any(|i| i.class == ItemClass::MustKeep);
     if unstructured && no_omissions {
         if let Some(raw) = result.raw_text.as_deref() {
             let raw_trim = raw.trim_end_matches(['\n', '\r']);
@@ -203,6 +204,7 @@ pub fn render_lean(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
                 && matches!(opts.verbosity.as_deref(), Some("minimal"))
                 && matches!(result.tool, "run" | "sh" | "check");
             let can_passthrough = !minimal_tool_success
+                && !has_must_body
                 && (small_enough || insufficient_gain)
                 && (result.handles.is_empty() || !body_from_items || pass_t <= structured_t);
             if can_passthrough && (small_enough || pass_t <= structured_t) {

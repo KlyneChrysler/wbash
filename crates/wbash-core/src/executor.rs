@@ -18,6 +18,7 @@ pub struct ExecRequest {
     pub stdin: Option<Vec<u8>>,
     pub env: HashMap<String, String>,
     pub max_output_bytes: u64,
+    pub kill_grace_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -72,8 +73,14 @@ pub fn build_env(
     per_call: Option<&HashMap<String, String>>,
 ) -> Result<HashMap<String, String>> {
     let mut env = HashMap::new();
-    for (k, v) in std::env::vars() {
-        if env_allowed(&config.exec.env_allow, &k) && !Redactor::is_secret_key(&k) {
+    for (k, v) in std::env::vars_os() {
+        let Ok(k) = k.into_string() else {
+            continue;
+        };
+        let Ok(v) = v.into_string() else {
+            continue;
+        };
+        if env_allowed(&config.exec.env_allow, &k) {
             env.insert(k, v);
         }
     }
@@ -198,7 +205,7 @@ pub fn execute(req: &ExecRequest) -> Result<ExecOutput> {
                             libc::kill(-pid, libc::SIGTERM);
                         }
                     }
-                    let grace = Duration::from_millis(200);
+                    let grace = Duration::from_millis(req.kill_grace_ms.max(1));
                     let grace_deadline = Instant::now() + grace;
                     while Instant::now() < grace_deadline {
                         if let Ok(Some(_)) = child.try_wait() {

@@ -6,3 +6,5 @@
 /bench/.cache
 /bench/results
 bench/__pycache__/
+
+/.opencode/

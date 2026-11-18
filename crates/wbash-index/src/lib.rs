@@ -359,8 +359,13 @@ impl Workspace {
         }
         let mut files = Vec::with_capacity(dc.files.len());
         for f in &dc.files {
+            let abs = self.root.join(&f.rel);
+            let meta = std::fs::metadata(&abs).ok()?;
+            if !meta.is_file() || meta.len() != f.size || mtime_ms(&meta) != f.mtime_ms {
+                return None;
+            }
             files.push(FileEntry {
-                abs: self.root.join(&f.rel),
+                abs,
                 rel: f.rel.clone(),
                 size: f.size,
                 mtime_ms: f.mtime_ms,

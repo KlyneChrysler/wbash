@@ -86,10 +86,10 @@ impl Registry {
                     "description": t.description(),
                     "inputSchema": t.schema(),
                     "annotations": {
-                        "readOnlyHint": t.min_tier() == Tier::ReadOnly,
+                        "readOnlyHint": t.min_tier() == Tier::ReadOnly && !matches!(t.name(), "git" | "batch"),
                         "destructiveHint": t.destructive(),
                         "idempotentHint": t.idempotent(),
-                        "openWorldHint": false
+                        "openWorldHint": matches!(t.name(), "run" | "sh")
                     }
                 })
             })

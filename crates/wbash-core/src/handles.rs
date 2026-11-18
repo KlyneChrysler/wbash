@@ -100,8 +100,17 @@ impl HandleStore {
             hash: rec.hash.clone(),
         };
         self.append_record_locked(&rec)?;
-        self.handles.insert(id, rec);
+        self.handles.insert(id.clone(), rec);
         self.evict_if_needed_locked()?;
+        if !self.handles.contains_key(&id) {
+            let _ = std::fs::remove_file(self.blob_path(&id));
+            self.rewrite_manifest_locked()?;
+            return Err(WErr::with_hint(
+                "handle_too_large",
+                format!("handle payload ({} bytes) exceeds cache limit", out.bytes),
+                "increase handles.max_bytes or reduce output size",
+            ));
+        }
         Ok(out)
     }
 

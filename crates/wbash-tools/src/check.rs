@@ -84,6 +84,7 @@ impl Tool for CheckTool {
         let mut tests: Vec<TestResult> = Vec::new();
         let mut all_ok = true;
         let mut ran = 0usize;
+        let mut missing = 0usize;
         let mut passed = 0usize;
         let mut failed = 0usize;
         let mut ignored = 0usize;
@@ -101,6 +102,7 @@ impl Tool for CheckTool {
                 Ok(r) => r,
                 Err(e) if e.code == "exec_not_found" => {
                     result.note(format!("missing {label}"));
+                    missing += 1;
                     continue;
                 }
                 Err(e) => return Err(e),
@@ -122,6 +124,13 @@ impl Tool for CheckTool {
                 ignored += pi;
                 let has_errors = p.diagnostics.iter().any(|d| d.severity == Severity::Error);
                 all_ok &= run.output.exit.is_success() && !has_errors && pf == 0;
+                let has_structured = !p.diagnostics.is_empty()
+                    || !p.tests.is_empty()
+                    || pf > 0
+                    || p.summary
+                        .as_ref()
+                        .map(|s| !s.trim().is_empty())
+                        .unwrap_or(false);
                 diagnostics.extend(p.diagnostics.clone());
                 tests.extend(p.tests.clone());
                 if run.output.exit.is_success() {
@@ -132,10 +141,14 @@ impl Tool for CheckTool {
                             result.note(format!("{label}: ok"));
                         }
                     }
-                } else {
+                } else if !has_structured {
                     result.note(format!("{label} parse_miss"));
                     let raw = run.output.combined();
                     util::compact_tail(&mut result, &raw, label, ctx.handles, true)?;
+                } else if verbose {
+                    if let Some(summary) = p.summary.as_ref().filter(|s| !s.trim().is_empty()) {
+                        result.note(format!("{label}: {summary}"));
+                    }
                 }
             } else if run.output.exit.is_success() {
                 if verbose {
@@ -166,7 +179,7 @@ impl Tool for CheckTool {
             .iter()
             .filter(|d| d.severity == Severity::Warn)
             .count();
-        let ok = all_ok && errors == 0 && failed == 0;
+        let ok = all_ok && errors == 0 && failed == 0 && missing == 0;
         let mut header = if errors == 0 && failed == 0 && ok {
             if warnings == 0 {
                 "ok".to_string()
@@ -175,16 +188,21 @@ impl Tool for CheckTool {
             }
         } else {
             let mut parts = Vec::new();
-            if !ok && errors == 0 && failed == 0 {
+            if !ok && errors == 0 && failed == 0 && missing == 0 {
                 parts.push("failed".to_string());
             }
             if errors > 0 {
                 parts.push(util::plural(errors, "error"));
             }
-            if failed > 0 {
-                parts.push(util::plural(failed, "failed"));
+            if warnings > 0 {
+                parts.push(util::plural(warnings, "warning"));
             }
-            parts.push(util::plural(warnings, "warning"));
+            if failed > 0 {
+                parts.push(util::plural(failed, "failed test"));
+            }
+            if missing > 0 {
+                parts.push(format!("{} missing", missing));
+            }
             parts.join(", ")
         };
         if failed > 0 && !header.contains("failed") {

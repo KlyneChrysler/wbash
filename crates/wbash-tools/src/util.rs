@@ -145,16 +145,45 @@ pub fn strip_ansi(input: &str) -> String {
                 }
             }
         } else if c == '\r' {
-            // Progress rewrites: keep only the text after the last CR.
+            // CRLF: normalize to LF, keep current line content.
+            if matches!(chars.peek(), Some('\n')) {
+                chars.next();
+                out.push('\n');
+                continue;
+            }
+            // Progress rewrites: keep only text after the last CR on this line.
             let mut tail = String::new();
-            for c in chars.by_ref() {
-                if c == '\n' {
-                    tail.push(c);
+            let mut saw_nl = false;
+            while let Some(&nc) = chars.peek() {
+                if nc == '\n' {
+                    tail.push('\n');
+                    chars.next();
+                    saw_nl = true;
                     break;
                 }
-                tail.push(c);
+                if nc == '\r' {
+                    if matches!(chars.clone().nth(1), Some('\n')) {
+                        // treat upcoming CRLF as end of rewritten line
+                        tail.push('\n');
+                        chars.next(); // \r
+                        chars.next(); // \n
+                        saw_nl = true;
+                        break;
+                    }
+                    tail.clear();
+                    chars.next();
+                    continue;
+                }
+                tail.push(nc);
+                chars.next();
+            }
+            if let Some(pos) = out.rfind('\n') {
+                out.truncate(pos + 1);
+            } else {
+                out.clear();
             }
             out.push_str(&tail);
+            let _ = saw_nl;
         } else {
             out.push(c);
         }

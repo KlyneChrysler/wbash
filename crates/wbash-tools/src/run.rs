@@ -54,6 +54,7 @@ pub fn execute_with_parsers(
         stdin: stdin.map(|s| s.to_vec()),
         env: env_map,
         max_output_bytes: ctx.config.exec.max_output_bytes,
+        kill_grace_ms: ctx.config.exec.kill_grace_ms,
     };
     let output = executor::execute(&req)?;
     let raw_machine = output.combined();

@@ -128,20 +128,27 @@ fn run_inner(argv: Vec<String>) -> Result<i32> {
     };
     if tool == "run" || tool == "sh" {
         if tool == "run" {
-            let argv_pos: Vec<String> = positionals.clone();
-            let argv = if argv_pos.is_empty() {
-                after_dd.clone()
-            } else {
-                argv_pos
-            };
+            let mut argv = positionals.clone();
+            if argv.is_empty() {
+                argv = after_dd.clone();
+            } else if !after_dd.is_empty() {
+                argv.extend(after_dd.clone());
+            }
             if !argv.is_empty() {
                 obj.insert(
                     "argv".into(),
                     Value::Array(argv.into_iter().map(Value::String).collect()),
                 );
             }
-        } else if let Some(cmd) = merged_pos.first() {
-            obj.insert("command".into(), Value::String(cmd.clone()));
+        } else {
+            let cmd = if !positionals.is_empty() {
+                positionals.join(" ")
+            } else {
+                after_dd.join(" ")
+            };
+            if !cmd.is_empty() {
+                obj.insert("command".into(), Value::String(cmd));
+            }
         }
     } else if tool == "git" {
         build_git_args(&mut obj, &merged_pos)?;
@@ -315,7 +322,12 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
     while i < tokens.len() {
         let tok = &tokens[i];
         if tok == "--" {
-            after_dd.extend(tokens[i + 1..].iter().cloned());
+            if tool == "git" {
+                positionals.push("--".to_string());
+                positionals.extend(tokens[i + 1..].iter().cloned());
+            } else {
+                after_dd.extend(tokens[i + 1..].iter().cloned());
+            }
             break;
         }
         if tok == "-m" && tool == "git" {
@@ -329,6 +341,29 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
             insert_value(&mut obj, "message", Value::String(tokens[i].clone()));
             i += 1;
             continue;
+        }
+        if tool == "git" {
+            if tok == "-n" {
+                i += 1;
+                if i >= tokens.len() {
+                    return Err(WErr::invalid_args(
+                        "-n requires a count",
+                        "w git log -n <count>",
+                    ));
+                }
+                let n = parse_count(&tokens[i], "-n")?;
+                obj.insert("limit".into(), Value::Number((n as i64).into()));
+                i += 1;
+                continue;
+            }
+            if let Some(nstr) = tok.strip_prefix("-n") {
+                if !nstr.is_empty() && nstr.chars().all(|c| c.is_ascii_digit()) {
+                    let n = parse_count(nstr, "-n")?;
+                    obj.insert("limit".into(), Value::Number((n as i64).into()));
+                    i += 1;
+                    continue;
+                }
+            }
         }
         if tool == "search" && (tok == "-e" || tok == "--regexp") {
             i += 1;
@@ -488,6 +523,7 @@ fn parse_scalar_for(key: &str, s: &str) -> Value {
             | "budget"
             | "start"
             | "end"
+            | "max_files"
     );
     let structured = matches!(key, "paths" | "pathspec" | "calls" | "argv");
     if numeric {
@@ -616,21 +652,34 @@ fn build_git_args(obj: &mut Map<String, Value>, pos: &[String]) -> Result<()> {
     let rest = &pos[1.min(pos.len())..];
     match op.as_str() {
         "commit" => {
-            if !obj.contains_key("message") && !rest.is_empty() {
-                obj.insert("message".into(), Value::String(rest[0].clone()));
-                if rest.len() > 1 && !obj.contains_key("pathspec") {
+            let (msg_side, path_side) = if let Some(idx) = rest.iter().position(|t| t == "--") {
+                (&rest[..idx], &rest[idx + 1..])
+            } else {
+                (rest, &[] as &[String])
+            };
+            if !obj.contains_key("message") && !msg_side.is_empty() {
+                obj.insert("message".into(), Value::String(msg_side[0].clone()));
+                let mut ps = msg_side[1..].to_vec();
+                ps.extend(path_side.iter().cloned());
+                if !ps.is_empty() && !obj.contains_key("pathspec") {
                     obj.insert(
                         "pathspec".into(),
-                        Value::Array(rest[1..].iter().cloned().map(Value::String).collect()),
+                        Value::Array(ps.into_iter().map(Value::String).collect()),
                     );
                 }
-            } else if obj.contains_key("message")
-                && !rest.is_empty()
-                && !obj.contains_key("pathspec")
-            {
+            } else if obj.contains_key("message") {
+                let mut ps = msg_side.to_vec();
+                ps.extend(path_side.iter().cloned());
+                if !ps.is_empty() && !obj.contains_key("pathspec") {
+                    obj.insert(
+                        "pathspec".into(),
+                        Value::Array(ps.into_iter().map(Value::String).collect()),
+                    );
+                }
+            } else if !path_side.is_empty() && !obj.contains_key("pathspec") {
                 obj.insert(
                     "pathspec".into(),
-                    Value::Array(rest.iter().cloned().map(Value::String).collect()),
+                    Value::Array(path_side.iter().cloned().map(Value::String).collect()),
                 );
             }
         }
@@ -669,16 +718,32 @@ fn build_git_args(obj: &mut Map<String, Value>, pos: &[String]) -> Result<()> {
             }
         }
         "show" => {
-            if let Some(r) = rest.first() {
-                if !obj.contains_key("ref") {
-                    obj.insert("ref".into(), Value::String(r.clone()));
+            if let Some(idx) = rest.iter().position(|t| t == "--") {
+                let left = &rest[..idx];
+                let right = &rest[idx + 1..];
+                if let Some(r) = left.first() {
+                    if !obj.contains_key("ref") {
+                        obj.insert("ref".into(), Value::String(r.clone()));
+                    }
                 }
-            }
-            if rest.len() > 1 && !obj.contains_key("pathspec") {
-                obj.insert(
-                    "pathspec".into(),
-                    Value::Array(rest[1..].iter().cloned().map(Value::String).collect()),
-                );
+                if !right.is_empty() && !obj.contains_key("pathspec") {
+                    obj.insert(
+                        "pathspec".into(),
+                        Value::Array(right.iter().cloned().map(Value::String).collect()),
+                    );
+                }
+            } else {
+                if let Some(r) = rest.first() {
+                    if !obj.contains_key("ref") {
+                        obj.insert("ref".into(), Value::String(r.clone()));
+                    }
+                }
+                if rest.len() > 1 && !obj.contains_key("pathspec") {
+                    obj.insert(
+                        "pathspec".into(),
+                        Value::Array(rest[1..].iter().cloned().map(Value::String).collect()),
+                    );
+                }
             }
         }
         "log" => {
@@ -934,6 +999,14 @@ fn print_help() {
 // ---------------------------------------------------------------------------
 
 pub fn run_mcp(argv: Vec<String>) -> i32 {
+    if argv.iter().any(|a| a == "--version" || a == "-V") {
+        println!("w {}", env!("CARGO_PKG_VERSION"));
+        return 0;
+    }
+    if argv.iter().any(|a| a == "--help" || a == "-h") {
+        print_help();
+        return 0;
+    }
     let (global, tool, rest) = match parse_global(&argv) {
         Ok(v) => v,
         Err(e) => {

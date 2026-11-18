@@ -240,18 +240,29 @@ impl Tool for ReplaceTool {
                 candidates.push(f);
             }
         }
-        if candidates.len() > a.max_files as usize {
+        if candidates.len() > (a.max_files as usize).saturating_mul(20) {
             return Err(WErr::with_hint(
                 "too_many_files",
-                format!("{} files in scope (max {})", candidates.len(), a.max_files),
-                "narrow path/glob or raise max_files",
+                format!(
+                    "{} files in scope (max scan {})",
+                    candidates.len(),
+                    a.max_files
+                ),
+                "narrow path/glob",
             ));
         }
 
+        struct Planned {
+            rel: String,
+            abs: std::path::PathBuf,
+            replaced: usize,
+            bytes: Vec<u8>,
+            diff: Vec<String>,
+        }
+
+        let mut planned: Vec<Planned> = Vec::new();
         let mut total_replacements = 0usize;
-        let mut files_changed = 0usize;
-        let mut file_summaries: Vec<String> = Vec::new();
-        let mut full_diff: Vec<String> = Vec::new();
+        let mut files_with_matches = 0usize;
         let mut remaining_limit = a.limit.map(|l| l as usize);
         const MAX_DIFF_LINES: usize = 2000;
 
@@ -270,50 +281,44 @@ impl Tool for ReplaceTool {
             if n == 0 {
                 continue;
             }
+            files_with_matches += 1;
+            if files_with_matches > a.max_files as usize {
+                return Err(WErr::with_hint(
+                    "too_many_files",
+                    format!(
+                        "{} files with matches (max {})",
+                        files_with_matches, a.max_files
+                    ),
+                    "narrow path/glob or raise max_files",
+                ));
+            }
             let apply_n = remaining_limit.map(|l| l.min(n)).unwrap_or(n);
             let (new, replaced) = matcher.replace_all(&old, &a.replace, Some(apply_n));
             if replaced == 0 || new == old {
                 continue;
             }
             total_replacements += replaced;
-            files_changed += 1;
             if let Some(ref mut lim) = remaining_limit {
                 *lim = lim.saturating_sub(replaced);
             }
 
-            file_summaries.push(format!("{} ({})", f.rel, replaced));
-            if full_diff.len() < MAX_DIFF_LINES {
-                let file_diffs = render_file_diff(&f.rel, &old, &new);
-                for l in file_diffs {
-                    if full_diff.len() >= MAX_DIFF_LINES {
-                        break;
-                    }
-                    full_diff.push(l);
-                }
-            }
-
-            if !a.dry_run {
-                let bytes = match tf.encoding.unwrap_or(wbash_index::TextEncoding::Utf8) {
-                    enc @ (wbash_index::TextEncoding::Utf16Le
-                    | wbash_index::TextEncoding::Utf16Be
-                    | wbash_index::TextEncoding::Latin1) => wbash_index::encode_text(&new, enc)
-                        .map_err(|e| {
-                            WErr::new("invalid_args", format!("cannot encode replace: {e}"))
-                        })?,
-                    wbash_index::TextEncoding::Utf8 => new.as_bytes().to_vec(),
-                };
-                util::atomic_write(&f.abs, &bytes)?;
-                ctx.ledger.invalidate_path(&f.rel);
-                if let Ok(meta) = std::fs::metadata(&f.abs) {
-                    let m = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as i64)
-                        .unwrap_or(0);
-                    ctx.workspace.invalidate_file(&f.rel, meta.len(), m);
-                }
-            }
+            let diff = render_file_diff(&f.rel, &old, &new);
+            let bytes = match tf.encoding.unwrap_or(wbash_index::TextEncoding::Utf8) {
+                enc @ (wbash_index::TextEncoding::Utf16Le
+                | wbash_index::TextEncoding::Utf16Be
+                | wbash_index::TextEncoding::Latin1) => wbash_index::encode_text(&new, enc)
+                    .map_err(|e| {
+                        WErr::new("invalid_args", format!("cannot encode replace: {e}"))
+                    })?,
+                wbash_index::TextEncoding::Utf8 => new.as_bytes().to_vec(),
+            };
+            planned.push(Planned {
+                rel: f.rel.clone(),
+                abs: f.abs.clone(),
+                replaced,
+                bytes,
+                diff,
+            });
         }
 
         if total_replacements == 0 {
@@ -322,6 +327,37 @@ impl Tool for ReplaceTool {
                 "0 matches",
                 "check find/glob/path; use word=false or regex for patterns",
             ));
+        }
+
+        let files_changed = planned.len();
+        let mut file_summaries: Vec<String> = Vec::with_capacity(files_changed);
+        let mut full_diff: Vec<String> = Vec::new();
+        for p in &planned {
+            file_summaries.push(format!("{} ({})", p.rel, p.replaced));
+            if full_diff.len() < MAX_DIFF_LINES {
+                for l in &p.diff {
+                    if full_diff.len() >= MAX_DIFF_LINES {
+                        break;
+                    }
+                    full_diff.push(l.clone());
+                }
+            }
+        }
+
+        if !a.dry_run {
+            for p in &planned {
+                util::atomic_write(&p.abs, &p.bytes)?;
+                ctx.ledger.invalidate_path(&p.rel);
+                if let Ok(meta) = std::fs::metadata(&p.abs) {
+                    let m = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0);
+                    ctx.workspace.invalidate_file(&p.rel, meta.len(), m);
+                }
+            }
         }
 
         let header = if a.dry_run {
