@@ -74,12 +74,13 @@ impl Tool for TreeTool {
         }
         let gs = util::globset(a.glob.as_deref())?;
         let base_rel = ctx.rel(&base);
-        let walk = ctx.workspace.walk_filtered(Some(&|rel| {
-            util::under(rel, &base_rel) && util::matches_glob(gs.as_ref(), rel)
-        }));
+        let walk = ctx.workspace.walk_cached_arc();
 
         let mut root = DirNode::default();
-        for f in &walk.files {
+        for f in walk.files.iter() {
+            if !(util::under(&f.rel, &base_rel) && util::matches_glob(gs.as_ref(), &f.rel)) {
+                continue;
+            }
             let rel = if base_rel == "." {
                 f.rel.clone()
             } else {
