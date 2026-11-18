@@ -1,23 +1,25 @@
 # w-bash
 
-Workspace operations tool for AI agents in developer tools and other systems, not intended for direct human use.
+tool for ai agents. not for humans.
 
-Provides file discovery, code search, file read and edit, command and test execution, and Git operations. Returns compact, structured output to reduce token consumption while preserving diagnostics, test failures, source locations, exit codes, and modified lines. Truncated output can be retrieved with `expand ~id`.
+runs file, search, read, edit, command, test, and git tasks with less output. keeps errors, test failures, file locations, exit codes, and changed lines. use `expand ~id` for full output.
 
-## Build
+## build
 
-Requires Rust and Git.
+needs rust and git.
 
 ```sh
-git clone https://github.com/KlyneChrysler/wbash.git
+git clone https://github.com/klynechrysler/wbash.git
 cd wbash && cargo build --release
-# target/release/w (CLI), target/release/w-bash (MCP server)
 ```
 
-## Usage
+- `target/release/w`: cli
+- `target/release/w-bash`: mcp server
+
+## usage
 
 ```sh
-w [--root DIR] [--session ID] [--format lean|json] [--budget N] [--tier read_only|write_workspace|execute|git_write] <tool> [args]
+w [--root dir] [--session id] [--format lean|json] [--budget n] [--tier read_only|write_workspace|execute|git_write] <tool> [args]
 
 w tree src --depth 2
 w search "pattern" src
@@ -30,22 +32,23 @@ w --tier git_write git commit -m "message"
 w expand ~id
 ```
 
-Use `--` to pass arguments to `run` or positional values beginning with `-`.
+use `--` before args for `run` or values starting with `-`.
 
-## MCP
+## mcp
 
 ```sh
 w-bash --root /path/to/project
 ```
 
-Starts a stdio MCP server for agent integration.
+stdio server for agent clients.
 
-## Configuration
+## config
 
-- User: `$XDG_CONFIG_HOME/w-bash/config.toml` or `~/.config/w-bash/config.toml`
-- Project: `.w-bash/config.toml` (loaded only when trusted)
-- Commands: `w config trust`, `w config show`
+- user: `~/.config/w-bash/config.toml`
+- project: `.w-bash/config.toml` (trusted only)
+- `w config trust`
+- `w config show`
 
-## License
+## license
 
-MIT
+mit
