@@ -47,8 +47,9 @@ fn warm_read_and_search_perf() {
         Arc::new(ParserRegistry::new()),
     )
     .unwrap();
-    // warm index
+    // warm index and read path
     let _ = d.call("search", &json!({"pattern":"needle"}), "s");
+    let _ = d.call("read", &json!({"path":"target.rs"}), "s");
 
     let mut read_ms = Vec::new();
     for _ in 0..30 {
@@ -68,11 +69,19 @@ fn warm_read_and_search_perf() {
     search_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let rp95 = read_ms[(read_ms.len() * 95 / 100).saturating_sub(1)];
     let sp95 = search_ms[(search_ms.len() * 95 / 100).saturating_sub(1)];
+    let read_limit: f64 = std::env::var("WBASH_WARM_READ_P95_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5.0);
+    let search_limit: f64 = std::env::var("WBASH_WARM_SEARCH_P95_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50.0);
     eprintln!(
-        "warm read p95={rp95:.2}ms search p95={sp95:.2}ms files~{}",
+        "warm read p95={rp95:.2}ms search p95={sp95:.2}ms files~{} limits=<{read_limit}/{search_limit}ms",
         dirs * per_dir
     );
-    assert!(rp95 < 5.0, "read p95 {rp95}");
-    assert!(sp95 < 50.0, "search p95 {sp95}");
+    assert!(rp95 < read_limit, "read p95 {rp95}");
+    assert!(sp95 < search_limit, "search p95 {sp95}");
     let _ = std::fs::remove_dir_all(root);
 }
