@@ -295,69 +295,107 @@ impl Tool for SearchTool {
 
         let mut context_cache: HashMap<String, Arc<str>> = HashMap::new();
         let mut context_lines: Vec<String> = Vec::new();
-        // Group consecutive hits in same file with identical snippet as path:l1,l2
-        let mut i = 0usize;
-        while i < hits.len() {
-            let hit = &hits[i];
-            let class = if hit.is_definition {
-                ItemClass::High
-            } else {
-                ItemClass::Low
-            };
-            let mut lines = vec![hit.line];
-            let mut j = i + 1;
-            while j < hits.len()
-                && hits[j].path == hit.path
-                && hits[j].snippet == hit.snippet
-                && hits[j].is_definition == hit.is_definition
-            {
-                if let Some(last) = lines.last().copied() {
-                    if hits[j].line <= last + 1 + a.context { /* keep separate for context clarity */
-                    }
-                }
-                // fold only identical adjacent snippet records with no gaps requested
-                if a.context == 0 {
-                    lines.push(hits[j].line);
-                    j += 1;
+
+        // group returned hits by file in first-seen (score) order
+        let mut file_order: Vec<String> = Vec::new();
+        let mut by_file: HashMap<String, Vec<Hit>> = HashMap::new();
+        for h in &hits {
+            if !by_file.contains_key(&h.path) {
+                file_order.push(h.path.clone());
+                by_file.insert(h.path.clone(), Vec::new());
+            }
+            by_file.get_mut(&h.path).unwrap().push(h.clone());
+        }
+
+        for path in &file_order {
+            let mut fhits = by_file.remove(path).unwrap();
+            fhits.sort_by(|a, b| a.line.cmp(&b.line).then(a.col.cmp(&b.col)));
+            let grouped = fhits.len() >= 3;
+            if grouped {
+                result.push(Item::new(
+                    ItemClass::High,
+                    fhits
+                        .iter()
+                        .map(|h| if h.is_definition { 8.0 } else { 3.0 })
+                        .fold(0.0f32, f32::max),
+                    vec![format!("{} ({}):", path, fhits.len())],
+                ));
+            }
+            let mut i = 0usize;
+            while i < fhits.len() {
+                let hit = &fhits[i];
+                let class = if hit.is_definition {
+                    ItemClass::High
                 } else {
-                    break;
-                }
-            }
-            let loc = if lines.len() == 1 {
-                format!("{}:{}", hit.path, lines[0])
-            } else {
-                let joined = lines
-                    .iter()
-                    .map(|n| n.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!("{}:{}", hit.path, joined)
-            };
-            result.push(Item::new(
-                class,
-                if hit.is_definition { 8.0 } else { 3.0 },
-                vec![format!("{}: {}", loc, hit.snippet)],
-            ));
-            if a.context > 0 {
-                let text = context_cache.entry(hit.path.clone()).or_insert_with(|| {
-                    ctx.workspace
-                        .read_search_text_for_path(&hit.path)
-                        .unwrap_or_else(|_| Arc::from(""))
-                });
-                if !text.is_empty() {
-                    let all: Vec<&str> = text.lines().collect();
-                    let lo = (hit.line as usize).saturating_sub(a.context as usize + 1);
-                    let hi = ((hit.line as usize) + a.context as usize).min(all.len());
-                    for (k, l) in all.iter().enumerate().take(hi).skip(lo) {
-                        let n = k + 1;
-                        if n as u32 == hit.line {
-                            continue;
-                        }
-                        context_lines.push(format!("{}:{}- {}", hit.path, n, l.trim()));
+                    ItemClass::Low
+                };
+                let mut lines = vec![hit.line];
+                let mut j = i + 1;
+                while j < fhits.len()
+                    && fhits[j].snippet == hit.snippet
+                    && fhits[j].is_definition == hit.is_definition
+                {
+                    if a.context == 0 {
+                        lines.push(fhits[j].line);
+                        j += 1;
+                    } else {
+                        break;
                     }
                 }
+                let loc = if lines.len() == 1 {
+                    format!("{}", lines[0])
+                } else {
+                    lines
+                        .iter()
+                        .map(|n| n.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                };
+                let line = if grouped {
+                    format!("  {}: {}", loc, hit.snippet)
+                } else {
+                    let flat_loc = if lines.len() == 1 {
+                        format!("{}:{}", hit.path, lines[0])
+                    } else {
+                        let joined = lines
+                            .iter()
+                            .map(|n| n.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!("{}:{}", hit.path, joined)
+                    };
+                    format!("{}: {}", flat_loc, hit.snippet)
+                };
+                if grouped {
+                    result.low(line);
+                } else {
+                    result.push(Item::new(
+                        class,
+                        if hit.is_definition { 8.0 } else { 3.0 },
+                        vec![line],
+                    ));
+                }
+                if a.context > 0 {
+                    let text = context_cache.entry(hit.path.clone()).or_insert_with(|| {
+                        ctx.workspace
+                            .read_search_text_for_path(&hit.path)
+                            .unwrap_or_else(|_| Arc::from(""))
+                    });
+                    if !text.is_empty() {
+                        let all: Vec<&str> = text.lines().collect();
+                        let lo = (hit.line as usize).saturating_sub(a.context as usize + 1);
+                        let hi = ((hit.line as usize) + a.context as usize).min(all.len());
+                        for (k, l) in all.iter().enumerate().take(hi).skip(lo) {
+                            let n = k + 1;
+                            if n as u32 == hit.line {
+                                continue;
+                            }
+                            context_lines.push(format!("{}:{}- {}", hit.path, n, l.trim()));
+                        }
+                    }
+                }
+                i = j;
             }
-            i = j;
         }
         for line in context_lines {
             result.low(line);

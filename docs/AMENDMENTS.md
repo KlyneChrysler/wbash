@@ -3,12 +3,10 @@
 Deviations from `docs/spec-v3.md` implemented in v0.1.0. Each entry records the
 reason and the affected gate/test.
 
-## A1. Search does not fold multi-line hits
-- Spec example renders `path:12,58: snippet` for repeated hits on one line set.
-- Implementation emits one record per hit (`path:line: snippet`) and lets the
-  budget fitter elide contiguous records.
-- Reason: deterministic ordering and simpler exact-line handle payloads.
-- Tests: `tests/golden/search/basic.lean`, differential grep parity.
+## A1. Search grouping
+- Spec renders per-file groups. Implementation preserves first-seen file order by rank, sorts returned hits by line within a file, and groups under `path (N):` with `  line: snippet` when a file has >=3 returned hits. Files with <3 returned hits emit flat `path:line: snippet` (or `path:l1,l2: snippet` for identical adjacent snippets without context) to keep overhead low.
+- Reason: reduce repeated-path tokens on dense result sets while keeping sparse results flat.
+- Tests: `tests/golden/search/basic.lean`, `crates/wbash-tools/tests/differential.rs`, `crates/wbash-tools/tests/invariants.rs`.
 
 ## A2. Git tier is enforced at call time
 - `git` advertises `read_only` via `Tool::min_tier` because most operations are
@@ -134,9 +132,8 @@ reason and the affected gate/test.
 - I8: prefer `unchanged`/handle refs for identical verified in-session scopes (ledger-backed).
 - Benchmark claims must use fair command mapping for baselines (incl. RTK) and agentic E2E protocol (pinned model/harness, turns/retries/model tokens) for “beats X” assertions; scripted benchmarks remain required evidence.
 
-## A24. Binary detection boundary fix
-- `is_binary` now checks the full buffer: NUL bytes or invalid UTF-8 mark a file binary, while an incomplete trailing multi-byte sequence (`Utf8Error::error_len() == None`) is text. Previously a code point split at the 8192-byte probe boundary misclassified valid text (e.g. `gh_cmd.rs`), and `search` silently returned `0 matches`.
-- Zero-result `search` now notes `# skipped N binary file(s)` when binary files were skipped.
+## A24. Binary detection and UTF-8 fallback
+- `is_binary` checks the full buffer: NUL bytes mark a file binary, while an incomplete trailing multi-byte sequence (`Utf8Error::error_len() == None`) is treated as text. Invalid UTF-8 without NUL is decoded as Latin-1 text so search/read/edit can operate on legacy source; edits re-encode with the original encoding. `search` skips files detected as binary and, on zero results, notes `# skipped N binary file(s)`.
 - Tests: `crates/wbash-index` unit tests (boundary split, truncated tail, invalid byte, NUL) and search/tool coverage.
 
 ## A25. Git habit flags (`-n`, display flags)
