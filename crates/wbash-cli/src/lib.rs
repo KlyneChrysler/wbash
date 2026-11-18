@@ -146,14 +146,22 @@ fn run_inner(argv: Vec<String>) -> Result<i32> {
     } else if tool == "git" {
         build_git_args(&mut obj, &merged_pos)?;
     } else if tool == "search" {
-        if !merged_pos.is_empty() {
+        if obj.contains_key("pattern") {
+            if merged_pos.len() == 1 {
+                obj.insert("path".into(), Value::String(merged_pos[0].clone()));
+            } else if merged_pos.len() > 1 {
+                let paths: Vec<Value> = merged_pos.iter().cloned().map(Value::String).collect();
+                obj.insert("paths".into(), Value::Array(paths));
+            }
+        } else if !merged_pos.is_empty() {
             obj.insert("pattern".into(), Value::String(merged_pos[0].clone()));
-        }
-        if merged_pos.len() == 2 {
-            obj.insert("path".into(), Value::String(merged_pos[1].clone()));
-        } else if merged_pos.len() > 2 {
-            let paths: Vec<Value> = merged_pos[1..].iter().cloned().map(Value::String).collect();
-            obj.insert("paths".into(), Value::Array(paths));
+            if merged_pos.len() == 2 {
+                obj.insert("path".into(), Value::String(merged_pos[1].clone()));
+            } else if merged_pos.len() > 2 {
+                let paths: Vec<Value> =
+                    merged_pos[1..].iter().cloned().map(Value::String).collect();
+                obj.insert("paths".into(), Value::Array(paths));
+            }
         }
     } else {
         fill_positionals(&tool, &mut obj, &merged_pos)?;
@@ -322,6 +330,19 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
             i += 1;
             continue;
         }
+        if tool == "search" && (tok == "-e" || tok == "--regexp") {
+            i += 1;
+            if i >= tokens.len() {
+                return Err(WErr::invalid_args(
+                    format!("{tok} requires a pattern"),
+                    "w search -e <pattern> [path]",
+                ));
+            }
+            obj.entry("pattern".to_string())
+                .or_insert_with(|| Value::String(tokens[i].clone()));
+            i += 1;
+            continue;
+        }
         if tool == "git"
             && matches!(
                 tok.as_str(),
@@ -342,6 +363,25 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
                 Some((k, v)) => (k, Some(v.to_string())),
                 None => (flag, None),
             };
+            if tool == "search" && raw_key == "regexp" {
+                let v = match inline {
+                    Some(v) => v,
+                    None => {
+                        i += 1;
+                        if i >= tokens.len() {
+                            return Err(WErr::invalid_args(
+                                "--regexp requires a pattern",
+                                "w search --regexp <pattern> [path]",
+                            ));
+                        }
+                        tokens[i].clone()
+                    }
+                };
+                obj.entry("pattern".to_string())
+                    .or_insert_with(|| Value::String(v));
+                i += 1;
+                continue;
+            }
             let key = kebab_to_snake(raw_key);
             if key == "env" {
                 let v = match inline {
@@ -397,6 +437,12 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
             continue;
         }
         if !matches!(tool, "run" | "sh") {
+            if tok.starts_with('-') && !tok.starts_with("--") && tok.len() > 1 {
+                return Err(WErr::invalid_args(
+                    format!("{tool}: unknown option '{tok}'"),
+                    "use positional args or --flag=value; run `w <tool> --help`",
+                ));
+            }
             if let Some((raw_key, raw_value)) = tok.split_once('=') {
                 let valid = !raw_key.is_empty()
                     && raw_key
@@ -959,5 +1005,43 @@ mod tests {
         let mut obj = Map::new();
         let pos = vec!["log".to_string(), "-p".to_string()];
         assert!(build_git_args(&mut obj, &pos).is_err());
+    }
+
+    #[test]
+    fn search_dash_e_sets_pattern() {
+        let (obj, pos, _) = super::parse_tool_args(
+            &["-e".to_string(), "foo|bar".to_string(), "src".to_string()],
+            "search",
+        )
+        .unwrap();
+        assert_eq!(obj.get("pattern").and_then(Value::as_str), Some("foo|bar"));
+        assert_eq!(pos, vec!["src".to_string()]);
+    }
+
+    #[test]
+    fn search_regexp_flag_sets_pattern() {
+        let (obj, pos, _) =
+            super::parse_tool_args(&["--regexp".to_string(), "foo".to_string()], "search").unwrap();
+        assert_eq!(obj.get("pattern").and_then(Value::as_str), Some("foo"));
+        assert!(pos.is_empty());
+    }
+
+    #[test]
+    fn unknown_short_flag_errors_for_search() {
+        let err =
+            super::parse_tool_args(&["-x".to_string(), "foo".to_string()], "search").unwrap_err();
+        assert!(
+            err.to_string().contains("unknown option") || err.render().contains("unknown option")
+        );
+    }
+
+    #[test]
+    fn short_flags_allowed_for_run_argv() {
+        let (_, pos, _) = super::parse_tool_args(
+            &["cargo".to_string(), "test".to_string(), "-q".to_string()],
+            "run",
+        )
+        .unwrap();
+        assert_eq!(pos, vec!["cargo", "test", "-q"]);
     }
 }

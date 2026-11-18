@@ -348,7 +348,7 @@ fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> 
                 .ok();
         let mut saw_result = false;
         let mut summed = RunCounts::default();
-        let mut panic_msg: Option<(String, String)> = None;
+        let mut panic_msg: Option<(String, Vec<String>)> = None;
         let mut messages: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         for line in stdout.lines() {
@@ -371,22 +371,28 @@ fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> 
             }
             if let Some(rest) = t.strip_prefix("---- ") {
                 if let Some(name) = rest.strip_suffix(" stdout ----") {
-                    panic_msg = Some((name.to_string(), String::new()));
+                    panic_msg = Some((name.to_string(), Vec::new()));
                     continue;
                 }
             }
             if let Some((name, msg)) = panic_msg.as_mut() {
-                if t == "failures:" {
-                    if !msg.is_empty() {
-                        messages.insert(name.clone(), msg.clone());
+                if t == "failures:" || t.starts_with("failures:") {
+                    let joined = msg.join("; ");
+                    if !joined.is_empty() {
+                        messages.insert(name.clone(), joined.chars().take(400).collect());
                     }
                     panic_msg = None;
                     continue;
                 }
-                if !t.is_empty() && !t.starts_with("thread '") {
-                    if msg.is_empty() {
-                        *msg = t.chars().take(240).collect();
-                    }
+                if t.starts_with("note: run with")
+                    || t.starts_with("thread '")
+                    || t.starts_with("stack backtrace")
+                    || t.starts_with("---- ")
+                {
+                    continue;
+                }
+                if !t.is_empty() && msg.len() < 3 {
+                    msg.push(t.chars().take(240).collect());
                     continue;
                 }
             }
@@ -421,8 +427,9 @@ fn parse_cargo(argv: &[String], exit: &Exit, stdout: &str) -> Option<ParsedRun> 
             ignored = i;
         }
         if let Some((name, msg)) = panic_msg {
-            if !msg.is_empty() {
-                messages.insert(name, msg);
+            let joined = msg.join("; ");
+            if !joined.is_empty() {
+                messages.insert(name, joined.chars().take(400).collect());
             }
         }
         for t in run.tests.iter_mut() {

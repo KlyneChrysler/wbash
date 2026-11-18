@@ -10,7 +10,6 @@ use wbash_core::registry::{Tool, ToolContext};
 use wbash_core::types::{format_duration_ms, Tier, ToolResult};
 
 use crate::run::execute_with_parsers;
-use crate::util;
 
 pub struct GitTool;
 
@@ -165,10 +164,7 @@ fn status(ctx: &mut ToolContext<'_>) -> Result<ToolResult> {
     }
     let mut r = ToolResult::new(
         "git",
-        format!(
-            "branch {branch_name}{tracking}, {} changed",
-            util::plural(entries.len(), "file")
-        ),
+        format!("branch {branch_name}{tracking}, {} changed", entries.len()),
     );
     for (code, path) in &entries {
         let class = if code.contains('U') || code == "AA" || code == "DD" {
@@ -288,10 +284,7 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
             r.low(line.to_string());
         }
     }
-    r.header = format!(
-        "{} changed, +{plus} -{minus}",
-        crate::util::plural(files, "file")
-    );
+    r.header = format!("{files} changed, +{plus} -{minus}");
     if out.truncated {
         r.note("output_truncated");
     }

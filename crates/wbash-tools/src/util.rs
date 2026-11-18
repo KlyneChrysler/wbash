@@ -259,7 +259,14 @@ pub fn tests_into(result: &mut ToolResult, tests: &[TestResult], paths_relative:
     for t in tests.iter().filter(|t| t.status.is_failure()) {
         let mut line = format!("{} {}", t.status.as_str().to_uppercase(), t.id);
         if let Some(msg) = &t.message {
-            let msg = msg.lines().next().unwrap_or("").trim();
+            let parts: Vec<String> = msg
+                .lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty())
+                .take(3)
+                .map(|l| l.to_string())
+                .collect();
+            let msg = parts.join("; ");
             if !msg.is_empty() {
                 line.push_str(": ");
                 line.push_str(&msg.chars().take(300).collect::<String>());

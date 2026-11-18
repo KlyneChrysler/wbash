@@ -34,6 +34,28 @@ failures:
 }
 
 #[test]
+fn cargo_libtest_assertion_preserves_left_right() {
+    let reg = registry();
+    let argv = vec!["cargo".to_string(), "test".to_string()];
+    let stdout = r#"{"reason":"compiler-artifact","package_id":"x 0.1.0"}
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
+test fails ... FAILED
+---- fails stdout ----
+thread 'fails' panicked at src/lib.rs:4:5:
+assertion `left == right` failed
+  left: 1
+ right: 2
+note: run with `RUST_BACKTRACE=1`
+failures:
+"#;
+    let run = reg.parse(&argv, &Exit::Code(101), stdout, "").unwrap();
+    let msg = run.tests[0].message.as_deref().unwrap_or("");
+    assert!(msg.contains("assertion"), "{msg}");
+    assert!(msg.contains("left: 1"), "{msg}");
+    assert!(msg.contains("right: 2"), "{msg}");
+}
+
+#[test]
 fn pytest_text() {
     let reg = registry();
     let argv = vec!["pytest".to_string(), "-q".to_string()];

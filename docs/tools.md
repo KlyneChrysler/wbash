@@ -21,18 +21,20 @@ JSON schemas are generated from the same argument structs and exposed over MCP
 ## Arguments
 
 - `tree`: `path="."`, `depth=2` (0 = unlimited), `glob`, `sizes=false`.
-  Directories beyond depth or with >40 entries render `name/ (N)`; files beyond
-  200 per directory become an elision handle.
+  Collapsed directories render as `name/ (N) ~h`; small leaf directories at a
+  depth boundary may be shown inline. Large file groups become `~h` handles.
 - `read`: `path`, optional `lines="A:B"` (1-based, clamped), `symbol`,
   `outline=false`, `expect_hash`, `force=false`. Repeated unchanged reads return
   `unchanged <path> (b3:...) expand ~h`; `force=true` re-emits content. Large
-  files emit an outline plus head and an elision handle for the remainder.
+  files emit head, `...+N lines (~h)`, then outline symbols beyond the head.
 - `search`: `pattern`, `mode="text"|"regex"|"symbol"`, `path="."` (or multiple paths), `paths`, `glob`, `context=0`,
-  `limit`. Returns ranked matches; CLI accepts multiple positional paths (e.g.
-  `w search pat src tests`). Counts use singular/plural forms; a zero-result
-  search that skipped binary files notes `# skipped N binary file(s)`. Files with
+  `limit`. Returns ranked matches; CLI accepts multiple positional paths and
+  `-e/--regexp <pattern>` (e.g. `w search -e pat src tests`). Text mode retries
+  safe `a|b` alternation on zero literal matches (`# '|' alternation`) or notes
+  `# '|' literal; try mode=regex`. Counts use singular/plural forms; zero-result
+  searches that skipped binary files note `# skipped N binary file(s)`. Files with
   >=3 returned hits are grouped as `path (N):` with indented `line: snippet`.
-- `expand`: `ref="~id"`, `grep`, `lines`, `head`, `tail`, `offset=0`, `all=false`, `depth=0`. `all=true` emits full selected content (no elision); `depth` (max 2, with `all`) inlines small nested text handles to reduce multi-hop recovery.
+- `expand`: `ref="~id"`, `grep`, `lines`, `head`, `tail`, `offset=0`, `all=false`, `depth=0`. Non-`all` views are capped by `handles.expand_max_tokens` and emit `# remaining=N next_offset=M` when truncated. `all=true` emits full selected content (capped by its internal limits); `depth` inlines nested text handles.
 - `edit`: `path` plus exactly one operation: `find`+`replace` (unique literal
   match), `lines`+`content` (splice), `create=true`+`content`, `overwrite=true`
   + `content`, or `delete=true`. `expect_hash` rejects stale writes. Writes are

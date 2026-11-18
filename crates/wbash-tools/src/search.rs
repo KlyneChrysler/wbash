@@ -46,6 +46,19 @@ struct Hit {
     score: i32,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum MatchMode<'a> {
+    Literal(&'a str),
+    Regex(&'a regex::Regex),
+}
+
+struct ScanStats {
+    files_with_hits: usize,
+    fallback: bool,
+    scanned_files: usize,
+    skipped_binary: usize,
+}
+
 impl Tool for SearchTool {
     fn name(&self) -> &'static str {
         "search"
@@ -123,10 +136,12 @@ impl Tool for SearchTool {
         };
 
         let mut hits: Vec<Hit> = Vec::new();
-        let mut files_with_hits = 0usize;
-        let mut fallback = false;
-        let mut scanned_files = 0usize;
-        let mut skipped_binary = 0usize;
+        let mut stats = ScanStats {
+            files_with_hits: 0,
+            fallback: false,
+            scanned_files: 0,
+            skipped_binary: 0,
+        };
         let pat_lc = a.pattern.to_ascii_lowercase();
         let pat_near = format!(" {pat_lc} ");
 
@@ -134,100 +149,45 @@ impl Tool for SearchTool {
         let filter = |rel: &str| {
             bases_rel.iter().any(|b| util::under(rel, b)) && util::matches_glob(gs.as_ref(), rel)
         };
-        for f in walk.files.iter() {
-            if !filter(&f.rel) {
-                continue;
-            }
-            scanned_files += 1;
-            let Ok((text, binary)) = ctx.workspace.read_search_text(f) else {
-                continue;
+
+        if a.mode == "symbol" {
+            scan_symbol(ctx, &a, &walk, &filter, &pat_lc, &mut hits, &mut stats);
+        } else {
+            let m = match &regex {
+                Some(re) => MatchMode::Regex(re),
+                None => MatchMode::Literal(&a.pattern),
             };
-            if binary {
-                skipped_binary += 1;
-                continue;
-            }
-            let path_lc = f.rel.to_ascii_lowercase();
-            if a.mode == "symbol" {
-                let outline = ctx
-                    .symbols
-                    .symbols_cached(&f.abs, &text, f.mtime_ms, f.size);
-                if outline.heuristic {
-                    fallback = true;
-                }
-                let before = hits.len();
-                for s in outline.symbols {
-                    let name_lc = s.name.to_ascii_lowercase();
-                    if s.name == a.pattern || name_lc.contains(&pat_lc) {
-                        let mut score = 10;
-                        if s.name == a.pattern {
-                            score += 8;
-                        } else if name_lc == pat_lc {
-                            score += 6;
-                        }
-                        score += path_boost_lc(&path_lc, &pat_lc);
-                        let line_text = s.line_text.trim();
-                        let kind_lc = s.kind.to_ascii_lowercase();
-                        let lt_lc = line_text.to_ascii_lowercase();
-                        let snippet = if lt_lc.starts_with(&format!("{kind_lc} "))
-                            || lt_lc.starts_with(&format!("pub {kind_lc} "))
-                            || lt_lc.starts_with(&format!("export {kind_lc} "))
-                            || lt_lc.starts_with(&format!("async {kind_lc} "))
-                        {
-                            line_text.to_string()
-                        } else {
-                            format!("{} {}", s.kind, line_text)
-                        };
-                        hits.push(Hit {
-                            path: f.rel.clone(),
-                            line: s.start_line as u32,
-                            col: 1,
-                            snippet,
-                            is_definition: true,
-                            score,
-                        });
-                    }
-                }
-                if hits.len() > before {
-                    files_with_hits += 1;
-                }
-                continue;
-            }
-            let before = hits.len();
-            for (idx, line) in text.lines().enumerate() {
-                let matched = match &regex {
-                    Some(re) => re.is_match(line),
-                    None => line.contains(&a.pattern),
-                };
-                if matched {
-                    let col = match &regex {
-                        Some(re) => re.find(line).map(|m| m.start() + 1).unwrap_or(1),
-                        None => line.find(&a.pattern).map(|i| i + 1).unwrap_or(1),
+            scan_lines(
+                ctx, &walk, &filter, &a, m, &pat_lc, &pat_near, &mut hits, &mut stats,
+            );
+        }
+
+        let mut alt_matched = false;
+        if a.mode == "text" && hits.is_empty() {
+            if let Some(alt_pat) = safe_alternation(&a.pattern) {
+                if let Ok(alt_re) = regex::Regex::new(&alt_pat) {
+                    hits.clear();
+                    stats = ScanStats {
+                        files_with_hits: 0,
+                        fallback: false,
+                        scanned_files: 0,
+                        skipped_binary: 0,
                     };
-                    let snippet = line.trim().chars().take(240).collect::<String>();
-                    let is_definition = looks_like_definition(line);
-                    let mut score = if is_definition { 8 } else { 3 };
-                    if a.mode != "regex" {
-                        let line_lc = line.to_ascii_lowercase();
-                        if line_lc.contains(&pat_near)
-                            || line_lc.starts_with(&pat_lc)
-                            || line_lc.ends_with(&pat_lc)
-                        {
-                            score += 2;
-                        }
+                    scan_lines(
+                        ctx,
+                        &walk,
+                        &filter,
+                        &a,
+                        MatchMode::Regex(&alt_re),
+                        &pat_lc,
+                        &pat_near,
+                        &mut hits,
+                        &mut stats,
+                    );
+                    if !hits.is_empty() {
+                        alt_matched = true;
                     }
-                    score += path_boost_lc(&path_lc, &pat_lc);
-                    hits.push(Hit {
-                        path: f.rel.clone(),
-                        line: (idx + 1) as u32,
-                        col: col as u32,
-                        snippet,
-                        is_definition,
-                        score,
-                    });
                 }
-            }
-            if hits.len() > before {
-                files_with_hits += 1;
             }
         }
 
@@ -255,22 +215,22 @@ impl Tool for SearchTool {
             if truncated {
                 format!(
                     "{}, {} ({returned} returned)",
-                    util::plural(files_with_hits, "file"),
+                    util::plural(stats.files_with_hits, "file"),
                     util::plural(total, "match")
                 )
             } else {
                 format!(
                     "{}, {}",
-                    util::plural(files_with_hits, "file"),
+                    util::plural(stats.files_with_hits, "file"),
                     util::plural(total, "match")
                 )
             },
         );
         if total == 1
             && !truncated
-            && !fallback
+            && !stats.fallback
             && !walk.truncated
-            && skipped_binary == 0
+            && stats.skipped_binary == 0
             && a.context == 0
         {
             if let Some(h) = hits.first() {
@@ -280,23 +240,27 @@ impl Tool for SearchTool {
                 return Ok(result);
             }
         }
-        if a.mode == "symbol" && fallback {
+        if alt_matched {
+            result.note("'|' alternation");
+        } else if a.mode == "text" && total == 0 && a.pattern.contains('|') {
+            result.note("'|' literal; try mode=regex");
+        }
+        if a.mode == "symbol" && stats.fallback {
             result.note("symbol_index_unavailable fallback_scan");
         }
         if walk.truncated {
             result.note("search_truncated");
         }
-        if total == 0 && skipped_binary > 0 {
+        if total == 0 && stats.skipped_binary > 0 {
             result.note(format!(
                 "skipped {}",
-                util::plural(skipped_binary, "binary file")
+                util::plural(stats.skipped_binary, "binary file")
             ));
         }
 
         let mut context_cache: HashMap<String, Arc<str>> = HashMap::new();
         let mut context_lines: Vec<String> = Vec::new();
 
-        // group returned hits by file in first-seen (score) order
         let mut file_order: Vec<String> = Vec::new();
         let mut by_file: HashMap<String, Vec<Hit>> = HashMap::new();
         for h in &hits {
@@ -417,7 +381,7 @@ impl Tool for SearchTool {
         result
             .meta
             .counts
-            .insert("files".into(), files_with_hits as i64);
+            .insert("files".into(), stats.files_with_hits as i64);
         result.meta.counts.insert("matches".into(), total as i64);
         result
             .meta
@@ -426,8 +390,167 @@ impl Tool for SearchTool {
         result
             .meta
             .counts
-            .insert("scanned".into(), scanned_files as i64);
+            .insert("scanned".into(), stats.scanned_files as i64);
         Ok(result)
+    }
+}
+
+fn safe_alternation(pattern: &str) -> Option<String> {
+    if pattern.contains("||") {
+        return None;
+    }
+    let parts: Vec<&str> = pattern.split('|').collect();
+    if parts.len() < 2 || parts.len() > 16 {
+        return None;
+    }
+    let mut branches = Vec::with_capacity(parts.len());
+    for p in parts {
+        let t = p.trim();
+        if t.is_empty() || t.len() != p.len() {
+            return None;
+        }
+        if t.chars().any(|c| c.is_whitespace()) {
+            return None;
+        }
+        if !t.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '@' | ':' | '+' | '-')
+        }) {
+            return None;
+        }
+        branches.push(regex::escape(t));
+    }
+    Some(format!("(?:{})", branches.join("|")))
+}
+
+fn scan_symbol(
+    ctx: &mut ToolContext<'_>,
+    a: &SearchArgs,
+    walk: &wbash_index::WalkResult,
+    filter: &impl Fn(&str) -> bool,
+    pat_lc: &str,
+    hits: &mut Vec<Hit>,
+    stats: &mut ScanStats,
+) {
+    for f in walk.files.iter() {
+        if !filter(&f.rel) {
+            continue;
+        }
+        stats.scanned_files += 1;
+        let Ok((text, binary)) = ctx.workspace.read_search_text(f) else {
+            continue;
+        };
+        if binary {
+            stats.skipped_binary += 1;
+            continue;
+        }
+        let path_lc = f.rel.to_ascii_lowercase();
+        let outline = ctx
+            .symbols
+            .symbols_cached(&f.abs, &text, f.mtime_ms, f.size);
+        if outline.heuristic {
+            stats.fallback = true;
+        }
+        let before = hits.len();
+        for s in outline.symbols {
+            let name_lc = s.name.to_ascii_lowercase();
+            if s.name == a.pattern || name_lc.contains(pat_lc) {
+                let mut score = 10;
+                if s.name == a.pattern {
+                    score += 8;
+                } else if name_lc == pat_lc {
+                    score += 6;
+                }
+                score += path_boost_lc(&path_lc, pat_lc);
+                let line_text = s.line_text.trim();
+                let kind_lc = s.kind.to_ascii_lowercase();
+                let lt_lc = line_text.to_ascii_lowercase();
+                let snippet = if lt_lc.starts_with(&format!("{kind_lc} "))
+                    || lt_lc.starts_with(&format!("pub {kind_lc} "))
+                    || lt_lc.starts_with(&format!("export {kind_lc} "))
+                    || lt_lc.starts_with(&format!("async {kind_lc} "))
+                {
+                    line_text.to_string()
+                } else {
+                    format!("{} {}", s.kind, line_text)
+                };
+                hits.push(Hit {
+                    path: f.rel.clone(),
+                    line: s.start_line as u32,
+                    col: 1,
+                    snippet,
+                    is_definition: true,
+                    score,
+                });
+            }
+        }
+        if hits.len() > before {
+            stats.files_with_hits += 1;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan_lines(
+    ctx: &mut ToolContext<'_>,
+    walk: &wbash_index::WalkResult,
+    filter: &impl Fn(&str) -> bool,
+    a: &SearchArgs,
+    matcher: MatchMode<'_>,
+    pat_lc: &str,
+    pat_near: &str,
+    hits: &mut Vec<Hit>,
+    stats: &mut ScanStats,
+) {
+    for f in walk.files.iter() {
+        if !filter(&f.rel) {
+            continue;
+        }
+        stats.scanned_files += 1;
+        let Ok((text, binary)) = ctx.workspace.read_search_text(f) else {
+            continue;
+        };
+        if binary {
+            stats.skipped_binary += 1;
+            continue;
+        }
+        let path_lc = f.rel.to_ascii_lowercase();
+        let before = hits.len();
+        for (idx, line) in text.lines().enumerate() {
+            let matched = match &matcher {
+                MatchMode::Regex(re) => re.is_match(line),
+                MatchMode::Literal(pat) => line.contains(pat),
+            };
+            if matched {
+                let col = match &matcher {
+                    MatchMode::Regex(re) => re.find(line).map(|m| m.start() + 1).unwrap_or(1),
+                    MatchMode::Literal(pat) => line.find(pat).map(|i| i + 1).unwrap_or(1),
+                };
+                let snippet = line.trim().chars().take(240).collect::<String>();
+                let is_definition = looks_like_definition(line);
+                let mut score = if is_definition { 8 } else { 3 };
+                if a.mode != "regex" && matches!(matcher, MatchMode::Literal(_)) {
+                    let line_lc = line.to_ascii_lowercase();
+                    if line_lc.contains(pat_near)
+                        || line_lc.starts_with(pat_lc)
+                        || line_lc.ends_with(pat_lc)
+                    {
+                        score += 2;
+                    }
+                }
+                score += path_boost_lc(&path_lc, pat_lc);
+                hits.push(Hit {
+                    path: f.rel.clone(),
+                    line: (idx + 1) as u32,
+                    col: col as u32,
+                    snippet,
+                    is_definition,
+                    score,
+                });
+            }
+        }
+        if hits.len() > before {
+            stats.files_with_hits += 1;
+        }
     }
 }
 

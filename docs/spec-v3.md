@@ -241,7 +241,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 
 ### 5.3 `tree`
 - **Args:** `path="."`, `depth=2` (int, 0=unlimited up to `index.max_tree_entries` guard), `glob?` (filter), `sizes=false`.
-- **Behavior:** apply ignore rules (gitignore, global, built-ins `.git,node_modules,target,vendor,.next,dist` configurable); sort dirs-first then files, lexicographic UTF-8 byte-stable; collapse directory entries when over inline threshold or depth exceeded as `name/ (N)`; aggregate omitted siblings `...+K more (~h)`.
+- **Behavior:** apply ignore rules (gitignore, global, built-ins `.git,node_modules,target,vendor,.next,dist` configurable); sort dirs-first then files, lexicographic UTF-8 byte-stable. Directories over inline threshold or beyond depth render collapsed as `name/ (N) ~h` with contents in a handle; small leaf directories at a depth boundary (no subdirectories, ≤5 files) may be shown inline. File groups beyond inline threshold render as `(N files) ~h`.
 - **Header:** `<display_path>/ (N files[, M dirs])` or `<display_path>/`.
 - **Errors:** `not_found`, `not_a_directory`, `outside_workspace`, `invalid_args`.
 
@@ -249,7 +249,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Args:** `path` (req), `lines?`, `symbol?`, `outline=false`, `expect_hash?`, `force=false`, `budget?`.
 - **Precedence:** `symbol` > `lines` > `outline` > default (ledger-aware full/summary).
 - **Default/ledger:** verify current bytes/hash; if matches `ReadSeen` for same scope → `unchanged <path> (b3:...) expand ~h` (handle omitted only if unavailable). `force=true` bypasses the ledger short-circuit and diff view, re-emitting the selected content. If changed and prior shown exists: emit compact diff (new-file line numbers, `@@` hunk headers allowed minimally) when `est(diff) < est(full)` and within budget, else selected full view. Always update ledger on success.
-- **Rendering:** text as `<line>: <content>` (line 1-based). Binary: `binary <mime-or-kind> <bytes> bytes [sha256-prefix]` no body. Oversize/no scope: outline + head `read.head_lines` + `full: ~h`.
+- **Rendering:** text as `<line>: <content>` (line 1-based). Binary: `binary <mime-or-kind> <bytes> bytes [sha256-prefix]` no body. Oversize/no scope: head `read.head_lines`, `...+N lines (~h)`, then outline symbols not already shown in the head.
 - **Outline:** supported langs (Rust, TS/TSX, Python, Go) via tree-sitter signatures/types/doc-first-lines with indentation nesting; fallback heuristic labeled `# heuristic_outline`.
 - **Symbol:** extract definition/body range for named symbol; if not found `!symbol_not_found symbol '<n>' in <path>. try: w search pattern=<n> mode=symbol` (or outline).
 - **Errors:** `not_found`, `outside_workspace`, `binary_unsupported` (symbol/lines on binary unless bytes-safe range defined; v0.1: error), `symbol_not_found`, `hash_mismatch`, `invalid_args`.
@@ -259,6 +259,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Engine:** ripgrep/`grep-*` crates; exact verification; ignore-aware. `symbol` uses index when available else text/def-heuristic fallback with `# symbol_index_unavailable fallback_scan`.
 - **Ranking (desc):** `is_definition` > `exact_case` > `ledger_proximity` > `recency_bucket` > `source_weight` (tests/vendor down-weighted unless in-scope/requested) > `match_quality`. Tie-break: `path,line,col`.
 - **Output:** header `<F> file(s), <M> match(es)` with singular forms when counts are 1 (and `(<R> returned)` if capped). When no matches are found but binary files were skipped, add `# skipped <N> binary file(s)` so zero is not silently misleading. Results keep first-seen file order by rank; hits are sorted by line within file. A file with >=3 returned hits renders as `path (N):` with `  line: snippet` (or `  l1,l2: snippet` for identical adjacent snippets without context); files with <3 returned hits render flat `path:line: snippet`. Context lines prefixed `path:line- snippet`. Overflow `...+M more (~h)`.
+- **Alternation fallback:** in text mode, if a literal scan finds zero matches and the pattern is a safe literal alternation (`a|b`, escaped branches), search retries as alternation and notes `# '|' alternation`; if no literal/alternation match is found and the pattern contains `|`, note `# '|' literal; try mode=regex`.
 - **Binary detection:** NUL bytes mark a file binary. An incomplete trailing multi-byte sequence is text. Invalid UTF-8 without NUL decodes as Latin-1 text (edits preserve/re-encode encoding) so search/read/edit remain usable on legacy source.
 - **Errors:** `invalid_regex` (with engine message/position), `outside_workspace`, `not_found` (path), `invalid_args`. Index not ready → results + `# index_warming fallback_scan`.
 
@@ -310,7 +311,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 
 ### 5.11 `expand`
 - **Args:** `ref` (req), `grep?` (regex), `lines?`, `head?`, `tail?`, `offset=0` (line/byte tokenized window per mode), `budget?`.
-- **Semantics:** resolve handle in session; apply filters in order `grep` → `lines` → `head|tail` → `offset/cap`; return filtered view with continuation note/offset hint when truncated.
+- **Semantics:** resolve handle in session; apply filters in order `grep` → `lines` → `head|tail` → `offset/cap`. Non-`all` views are capped by `handles.expand_max_tokens` and emit `# remaining=N next_offset=M` when truncated.
 - **Errors:** `handle_not_found`, `handle_expired`, `invalid_regex`, `invalid_range`, `invalid_args`.
 
 ### 5.12 `batch`

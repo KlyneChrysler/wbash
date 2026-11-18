@@ -160,3 +160,16 @@ reason and the affected gate/test.
 - Search/read paths use Arc-shared cached file text (rel-keyed, mtime/size validated), hoisted pattern work, cached context reads, and metadata-aware symbol lookups. Index prefetch skips files >64KB and known-binary extensions. Handle manifests append per put and compact on eviction/GC. In-place edits update workspace cache incrementally. `check all` skips redundant compile steps (`cargo check` when clippy runs; `go build` when vet/test runs).
 - Reason: reduce warm latency and per-file allocations/clones without changing tool semantics.
 - Tests: `crates/wbash-index`/`crates/wbash-core`/`crates/wbash-tools` unit, golden, invariant, differential suites; warm perf.
+
+## A31. Tree and read visibility
+- `tree` inlines small leaf dirs at depth boundaries (no subdirs, <=5 files) and emits collapsed handle ids on labels (`name/ (N) ~h`) instead of separate `expand` lines. Tree file lines are high-priority to avoid budget elision.
+- `read` emits head lines before the `...+N lines (~h)` marker and places outline symbols after it, skipping symbols inside the head to avoid duplicate line entries.
+- Reason: reduce extra expand calls and preserve visible context in compact output.
+- Tests: `crates/wbash-tools` tree/read/golden coverage.
+
+## A32. Search alternation, CLI flags, expand cap, and failure facts
+- Text-mode search auto-retries safe literal alternation (`a|b`) when a literal scan finds zero matches and emits `# '|' alternation`; zero literal pipe matches emit `# '|' literal; try mode=regex`.
+- CLI supports `-e`/`--regexp` for `search` and rejects unknown short flags for non `run`/`sh` tools with actionable errors.
+- `expand` enforces `handles.expand_max_tokens` for non-`all` views and emits `# remaining=N next_offset=M` when capped.
+- Git status and diff headers use `N changed`. Cargo panic parsing and failure rendering preserve up to 3 panic/assertion lines (including `left:`/`right:`).
+- Tests: `crates/wbash-cli`, `crates/wbash-parsers`, `crates/wbash-tools`, and golden coverage.

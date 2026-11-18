@@ -70,10 +70,10 @@ fn golden_wire_outputs() {
     let edit = d.call("edit", &json!({"path":"src/config.rs","find":"path.to_string()","replace":"path.trim().to_string()"}), "g");
     assert_eq!(edit.text, golden("edit/basic.lean"));
 
-    let big = d.call("read", &json!({"path":"src/config.rs","budget":30}), "g");
+    let big = d.call("read", &json!({"path":"big.txt","budget":64}), "g");
     let exp = d.call(
         "expand",
-        &json!({"ref": extract_handle(&big.text), "budget":2000}),
+        &json!({"ref": extract_handle(&big.text), "budget":4000}),
         "g",
     );
     assert_eq!(exp.text, golden("expand/basic.lean"));
@@ -163,6 +163,8 @@ fn generate_goldens() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     copy_fixture(&root);
+    let bigtext: String = (1..=120).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(root.join("big.txt"), bigtext).unwrap();
     let cache = root.with_extension("cache");
     let config_home = root.with_extension("config");
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -199,11 +201,11 @@ fn generate_goldens() {
     // edit
     let edit = d.call("edit", &json!({"path":"src/config.rs","find":"path.to_string()","replace":"path.trim().to_string()"}), "g");
     w("edit/basic.lean", &edit.text);
-    // expand: elide by tiny budget
-    let big = d.call("read", &json!({"path":"src/config.rs","budget":30}), "g");
+    // expand: elide by tiny budget then recover
+    let big = d.call("read", &json!({"path":"big.txt","budget":64}), "g");
     let exp = d.call(
         "expand",
-        &json!({"ref": extract_handle(&big.text), "budget":2000}),
+        &json!({"ref": extract_handle(&big.text), "budget":4000}),
         "g",
     );
     w("expand/basic.lean", &exp.text);

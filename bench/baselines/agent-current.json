@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-18T12:08:13Z",
+  "generated_at": "2026-11-18T13:36:03Z",
   "tokenizer": "cl100k_base",
   "summary": {
     "bash": {
@@ -8,7 +8,7 @@
       "tokens_est": 1228,
       "tokens_cl100k": 1724,
       "steps": 19,
-      "wall_ms": 10362,
+      "wall_ms": 6144,
       "by_kind": {
         "agent": {
           "tasks": 6,
@@ -22,16 +22,16 @@
     "w": {
       "tasks": 6,
       "passed": 6,
-      "tokens_est": 663,
-      "tokens_cl100k": 938,
+      "tokens_est": 660,
+      "tokens_cl100k": 936,
       "steps": 18,
-      "wall_ms": 8863,
+      "wall_ms": 6316,
       "by_kind": {
         "agent": {
           "tasks": 6,
           "passed": 6,
-          "tokens_est": 663,
-          "tokens_cl100k": 938,
+          "tokens_est": 660,
+          "tokens_cl100k": 936,
           "steps": 18
         }
       }
@@ -54,7 +54,7 @@
       "missing_expect": [],
       "tokens_est": 376,
       "tokens_cl100k": 550,
-      "wall_ms": 3299
+      "wall_ms": 1863
     },
     {
       "task": "agent_fix_test",
@@ -72,7 +72,7 @@
       "missing_expect": [],
       "tokens_est": 217,
       "tokens_cl100k": 341,
-      "wall_ms": 2255
+      "wall_ms": 1975
     },
     {
       "task": "agent_fix_type",
@@ -89,7 +89,7 @@
       "missing_expect": [],
       "tokens_est": 215,
       "tokens_cl100k": 292,
-      "wall_ms": 1831
+      "wall_ms": 988
     },
     {
       "task": "agent_fix_type",
@@ -106,7 +106,7 @@
       "missing_expect": [],
       "tokens_est": 59,
       "tokens_cl100k": 85,
-      "wall_ms": 2504
+      "wall_ms": 1040
     },
     {
       "task": "agent_rename_all",
@@ -123,7 +123,7 @@
       "missing_expect": [],
       "tokens_est": 135,
       "tokens_cl100k": 197,
-      "wall_ms": 1214
+      "wall_ms": 1136
     },
     {
       "task": "agent_rename_all",
@@ -139,7 +139,7 @@
       "missing_expect": [],
       "tokens_est": 49,
       "tokens_cl100k": 63,
-      "wall_ms": 1153
+      "wall_ms": 1007
     },
     {
       "task": "agent_clippy_fix",
@@ -156,7 +156,7 @@
       "missing_expect": [],
       "tokens_est": 129,
       "tokens_cl100k": 166,
-      "wall_ms": 532
+      "wall_ms": 322
     },
     {
       "task": "agent_clippy_fix",
@@ -173,7 +173,7 @@
       "missing_expect": [],
       "tokens_est": 107,
       "tokens_cl100k": 131,
-      "wall_ms": 387
+      "wall_ms": 292
     },
     {
       "task": "agent_git_edit",
@@ -190,7 +190,7 @@
       "missing_expect": [],
       "tokens_est": 146,
       "tokens_cl100k": 210,
-      "wall_ms": 96
+      "wall_ms": 66
     },
     {
       "task": "agent_git_edit",
@@ -205,9 +205,9 @@
       ],
       "check_exit": 0,
       "missing_expect": [],
-      "tokens_est": 90,
-      "tokens_cl100k": 128,
-      "wall_ms": 160
+      "tokens_est": 87,
+      "tokens_cl100k": 126,
+      "wall_ms": 151
     },
     {
       "task": "agent_parse_fix",
@@ -224,7 +224,7 @@
       "missing_expect": [],
       "tokens_est": 227,
       "tokens_cl100k": 309,
-      "wall_ms": 3390
+      "wall_ms": 1769
     },
     {
       "task": "agent_parse_fix",
@@ -241,7 +241,7 @@
       "missing_expect": [],
       "tokens_est": 141,
       "tokens_cl100k": 190,
-      "wall_ms": 2404
+      "wall_ms": 1851
     }
   ]
 }

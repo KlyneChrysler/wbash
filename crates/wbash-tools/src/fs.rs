@@ -168,20 +168,19 @@ fn render_tree(
     for (name, child) in &node.dirs {
         let count = child.file_count();
         let over_depth = level + 1 >= max_depth;
-        let collapse = over_depth || child.files.len() > 40 || child.dir_count() > 40;
+        let small_leaf = child.dirs.is_empty() && child.files.len() <= 5;
+        let collapse =
+            (over_depth && !small_leaf) || child.files.len() > 40 || child.dir_count() > 40;
         if collapse {
-            result.push(Item::new(
-                ItemClass::High,
-                5.0,
-                vec![format!("{indent}{name}/ ({count})")],
-            ));
             let mut lines = Vec::new();
             collect_tree_lines(child, &format!("{indent}  "), sizes, &mut lines);
-            if !lines.is_empty() {
+            if lines.is_empty() {
+                result.must(format!("{indent}{name}/ ({count})"));
+            } else {
                 let h = ctx
                     .handles
                     .put("tree", lines.join("\n").as_bytes(), "text")?;
-                result.must(format!("{indent}  expand {}", h.id));
+                result.must(format!("{indent}{name}/ ({count}) {}", h.id));
                 result.handle(HandleRef {
                     id: h.id.clone(),
                     kind: h.kind.clone(),
@@ -211,7 +210,6 @@ fn render_tree(
         } else {
             format!("{indent}({} files)", files.len())
         };
-        result.push(Item::new(ItemClass::High, 4.0, vec![label]));
         let lines: Vec<String> = files
             .iter()
             .map(|(n, s)| {
@@ -225,7 +223,7 @@ fn render_tree(
         let h = ctx
             .handles
             .put("tree", lines.join("\n").as_bytes(), "text")?;
-        result.must(format!("{indent}expand {}", h.id));
+        result.must(format!("{label} {}", h.id));
         result.handle(HandleRef {
             id: h.id.clone(),
             kind: h.kind.clone(),
@@ -239,7 +237,7 @@ fn render_tree(
             } else {
                 format!("{indent}{name}")
             };
-            result.low(line);
+            result.push(Item::new(ItemClass::High, 3.0, vec![line]));
         }
     }
     Ok(())
@@ -524,21 +522,13 @@ impl Tool for ReadTool {
         );
 
         if line_count > max_full {
-            let outline = ctx.symbols.symbols(&abs, &text);
-            if outline.heuristic {
-                r.note("heuristic_outline");
-            }
-            for s in &outline.symbols {
-                let pad = " ".repeat(s.indent.min(40));
-                r.push(Item::new(
-                    ItemClass::High,
-                    4.0,
-                    vec![format!("{pad}{}: {} {}", s.start_line, s.kind, s.name)],
-                ));
-            }
             let head = (ctx.config.read.head_lines as usize).min(line_count);
             for (i, line) in lines.iter().take(head).enumerate() {
-                r.low(format!("{}: {}", i + 1, line));
+                r.push(Item::new(
+                    ItemClass::High,
+                    6.0,
+                    vec![format!("{}: {}", i + 1, line)],
+                ));
             }
             let h = ctx.handles.put("read", text.as_bytes(), "text")?;
             r.must(format!("...+{} lines ({})", line_count - head, h.id));
@@ -548,6 +538,21 @@ impl Tool for ReadTool {
                 bytes: h.bytes,
                 hash: h.hash.clone(),
             });
+            let outline = ctx.symbols.symbols(&abs, &text);
+            if outline.heuristic {
+                r.note("heuristic_outline");
+            }
+            for s in &outline.symbols {
+                if s.start_line <= head {
+                    continue;
+                }
+                let pad = " ".repeat(s.indent.min(40));
+                r.push(Item::new(
+                    ItemClass::High,
+                    4.0,
+                    vec![format!("{pad}{}: {} {}", s.start_line, s.kind, s.name)],
+                ));
+            }
             record_read_snapshot(
                 ctx,
                 &display,
@@ -1154,31 +1159,52 @@ impl Tool for ExpandTool {
         } else {
             selected = all.iter().map(|s| (*s).to_string()).collect();
         }
-        let mut selected: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
+        let mut selected: Vec<String> = selected;
         if let Some(head) = a.head {
             selected.truncate(head as usize);
         }
         if let Some(tail) = a.tail {
             let skip = selected.len().saturating_sub(tail as usize);
-            selected = selected[skip..].to_vec();
+            selected = selected.split_off(skip);
         }
+        let filtered_total = selected.len();
         let offset = a.offset as usize;
         if offset > 0 {
             if offset >= selected.len() {
                 selected.clear();
             } else {
-                selected = selected[offset..].to_vec();
+                selected = selected.split_off(offset);
             }
         }
 
-        let filtered = a.grep.is_some()
+        let arg_filtered = a.grep.is_some()
             || a.lines.is_some()
             || a.head.is_some()
             || a.tail.is_some()
             || a.offset > 0;
+        if !a.all {
+            let cap = ctx.config.handles.expand_max_tokens.max(64) as usize;
+            let mut used = 0usize;
+            let mut page_len = selected.len();
+            for (i, line) in selected.iter().enumerate() {
+                let t = wbash_core::estimator::estimate_text(line).max(1) as usize;
+                if i > 0 && used.saturating_add(t) > cap {
+                    page_len = i;
+                    break;
+                }
+                used = used.saturating_add(t);
+            }
+            if page_len < selected.len() {
+                selected.truncate(page_len);
+            }
+        }
+        let consumed = offset + selected.len();
+        let remaining = filtered_total.saturating_sub(consumed);
+        let page_truncated = !a.all && remaining > 0;
+        let show_count = arg_filtered || page_truncated;
         let mut r = ToolResult::new(
             "expand",
-            if filtered {
+            if show_count {
                 format!(
                     "{id} {} of {total} lines ({} bytes, {})",
                     selected.len(),
@@ -1264,15 +1290,11 @@ impl Tool for ExpandTool {
             }
         } else {
             for line in &selected {
-                r.must(line.to_string());
+                r.must(line.clone());
             }
         }
-        let consumed = a.offset as usize + selected.len();
-        if consumed < total && filtered && !a.all {
-            r.note(format!(
-                "remaining={} next_offset={consumed}",
-                total - consumed
-            ));
+        if remaining > 0 && !a.all {
+            r.note(format!("remaining={remaining} next_offset={consumed}"));
         }
         r.meta.counts.insert("lines".into(), selected.len() as i64);
         r.meta.counts.insert("bytes".into(), rec.bytes as i64);
