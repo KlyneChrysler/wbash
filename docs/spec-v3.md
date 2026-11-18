@@ -279,7 +279,7 @@ Deterministic output depends on: normalized args, config hash, workspace bytes/m
 - **Matching:** literal byte/string matching by default; `word` wraps escaped literal with `\b`; `regex` uses the provided pattern. Replaces all matches (bounded by `limit` when set).
 - **Scope/limits:** resolves paths within workspace, honors gitignore/walk and glob; skips binary files; rejects scope > `max_files` with `!too_many_files`.
 - **Execution:** per-file atomic write (fsync+rename) unless `dry_run`; ledger invalidated and workspace cache updated per changed file.
-- **Output:** `replaced <N> match(es) in <M> file(s)` or `dry_run: ...` plus compact `path:line: -old`/`+new` diff lines (budget-fitted, elision handle). 0 matches -> `!replace_not_found`.
+- **Output:** `replaced <N> match(es) in <M> file(s)` or `dry_run: ...` plus per-file match counts (`path (N)`); with verbose output emits `path:line: -old`/`+new` diff lines (budget-fitted). 0 matches -> `!replace_not_found`.
 - **Errors:** `invalid_args`, `invalid_regex`, `too_many_files`, `replace_not_found`, `outside_workspace`, `permission_denied`.
 
 ### 5.8 `run`

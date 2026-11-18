@@ -39,8 +39,8 @@ JSON schemas are generated from the same argument structs and exposed over MCP
   atomic; a post-write syntax check is advisory. Confirmation is compact by default (`output.edit_confirm`).
 - `replace`: `find` (req), `replace` (req), `path="."` (or `paths`), `glob`,
   `word=false`, `regex=false`, `dry_run=false`, `max_files=200`, `limit`. Literal
-  by default; replaces all matches in scope. Returns compact per-file diff lines
-  (budget-elided) and counts. Writes are atomic per file.
+  by default; replaces all matches in scope. Returns per-file match counts;
+  `--verbosity verbose` emits diff lines (budget-fitted). Writes are atomic per file.
 - `run`: `argv=[...]` (no shell), `cwd="."`, `timeout_ms`, `stdin`, `env`
   (allowlisted keys only). Parsers consume injected/machine streams when used,
   while rendered tails/`raw_text`/`full` handles use user-relevant output with

@@ -250,7 +250,8 @@ impl Tool for ReplaceTool {
 
         let mut total_replacements = 0usize;
         let mut files_changed = 0usize;
-        let mut diff_lines: Vec<String> = Vec::new();
+        let mut file_summaries: Vec<String> = Vec::new();
+        let mut full_diff: Vec<String> = Vec::new();
         let mut remaining_limit = a.limit.map(|l| l as usize);
         const MAX_DIFF_LINES: usize = 2000;
 
@@ -280,13 +281,14 @@ impl Tool for ReplaceTool {
                 *lim = lim.saturating_sub(replaced);
             }
 
-            if diff_lines.len() < MAX_DIFF_LINES {
+            file_summaries.push(format!("{} ({})", f.rel, replaced));
+            if full_diff.len() < MAX_DIFF_LINES {
                 let file_diffs = render_file_diff(&f.rel, &old, &new);
                 for l in file_diffs {
-                    if diff_lines.len() >= MAX_DIFF_LINES {
+                    if full_diff.len() >= MAX_DIFF_LINES {
                         break;
                     }
-                    diff_lines.push(l);
+                    full_diff.push(l);
                 }
             }
 
@@ -336,8 +338,23 @@ impl Tool for ReplaceTool {
             )
         };
         let mut result = ToolResult::new("replace", header);
-        for l in diff_lines {
-            result.low(l);
+        let verbose = ctx.config.output.verbosity == "verbose";
+        if verbose {
+            for l in &full_diff {
+                result.low(l.clone());
+            }
+        } else if files_changed <= 6 {
+            for s in &file_summaries {
+                result.low(s.clone());
+            }
+        } else {
+            for s in file_summaries.iter().take(6) {
+                result.low(s.clone());
+            }
+            result.low(format!("...+{} files", files_changed - 6));
+        }
+        if verbose && full_diff.len() >= MAX_DIFF_LINES {
+            result.note("diff_truncated");
         }
         result
             .meta

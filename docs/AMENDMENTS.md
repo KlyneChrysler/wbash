@@ -152,7 +152,7 @@ reason and the affected gate/test.
 - Tests: `crates/wbash-parsers/tests/parsers.rs`.
 
 ## A29. `replace` tool
-- Added `replace` for multi-file literal/word/regex substitution with scope controls (`path`/`paths`/`glob`), `max_files`, `limit`, and `dry_run`. Replaces all matches (bounded), writes atomically per file, skips binaries, returns count-bearing headers with compact diff lines (budget-fitted). 0 matches -> `!replace_not_found`.
+- Added `replace` for multi-file literal/word/regex substitution with scope controls (`path`/`paths`/`glob`), `max_files`, `limit`, and `dry_run`. Replaces all matches (bounded), writes atomically per file, skips binaries, returns count-bearing headers with per-file match counts; verbose output emits diff lines (budget-fitted). 0 matches -> `!replace_not_found`.
 - Reason: `edit` requires a unique anchor and is single-file; agents need safe bulk renames/sweeps.
 - Tests: `crates/wbash-tools`/CLI coverage, MCP schema list includes `replace`.
 
