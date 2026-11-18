@@ -251,10 +251,10 @@ struct JsonError<'a> {
 struct JsonOut<'a> {
     ok: bool,
     tool: &'a str,
-    meta: &'a Meta,
+    meta: Meta,
     data: JsonData,
-    diagnostics: &'a [crate::types::Diagnostic],
-    handles: &'a [crate::types::HandleRef],
+    diagnostics: Vec<crate::types::Diagnostic>,
+    handles: Vec<crate::types::HandleRef>,
     errors: Vec<JsonError<'a>>,
 }
 
@@ -265,12 +265,11 @@ struct JsonData {
     elided_lines: usize,
 }
 
+/// JSON wire-format rendering (spec §6.3).
 pub fn render_json(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rendered> {
     let mut redactions = 0u32;
     let (header, n) = opts.redactor.redact(&result.header);
     redactions += n;
-    let mut lines: Vec<String> = Vec::new();
-    let mut elided = 0usize;
 
     let must_tokens: u32 = result
         .items
@@ -278,9 +277,12 @@ pub fn render_json(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
         .filter(|i| i.class == ItemClass::MustKeep)
         .map(|i| i.est_tokens)
         .sum();
+    let header_tokens = estimator::estimate_text(&header);
+    let budget_exceeded = must_tokens + header_tokens > opts.budget;
     let mut remaining = opts
         .budget
-        .saturating_sub(estimator::estimate_text(&header) + must_tokens);
+        .saturating_sub(header_tokens)
+        .saturating_sub(must_tokens);
 
     let mut order: Vec<usize> = result
         .items
@@ -292,13 +294,18 @@ pub fn render_json(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
     order.sort_by(|&a, &b| {
         let ia = &result.items[a];
         let ib = &result.items[b];
-        let ra = ia.value / (ia.est_tokens.max(1) as f32);
-        let rb = ib.value / (ib.est_tokens.max(1) as f32);
+        let ra = ia.value / (ia.est_tokens as f32).max(1.0);
+        let rb = ib.value / (ib.est_tokens as f32).max(1.0);
         rb.partial_cmp(&ra)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(a.cmp(&b))
     });
     let mut included = vec![false; result.items.len()];
+    for (idx, item) in result.items.iter().enumerate() {
+        if item.class == ItemClass::MustKeep {
+            included[idx] = true;
+        }
+    }
     for idx in order {
         let item = &result.items[idx];
         if item.est_tokens <= remaining {
@@ -306,34 +313,107 @@ pub fn render_json(result: &ToolResult, opts: RenderOptions<'_>) -> Result<Rende
             included[idx] = true;
         }
     }
+
+    let mut lines: Vec<String> = Vec::new();
+    if budget_exceeded {
+        lines.push("# budget_exceeded_must_keep".to_string());
+    }
+
+    let mut dropped_lines: Vec<String> = Vec::new();
+    let mut gaps: Vec<(usize, usize)> = Vec::new();
     for (idx, item) in result.items.iter().enumerate() {
-        if included[idx] || item.class == ItemClass::MustKeep {
+        if included[idx] {
+            if !dropped_lines.is_empty() {
+                let n = dropped_lines.len();
+                gaps.push((lines.len(), n));
+                lines.push(String::new());
+                dropped_lines.clear();
+            }
             for line in &item.lines {
                 let (red, n) = opts.redactor.redact(line);
                 redactions += n;
                 lines.push(red);
             }
         } else {
-            elided += item.lines.len();
+            dropped_lines.extend(item.lines.iter().cloned());
+        }
+    }
+    if !dropped_lines.is_empty() {
+        let n = dropped_lines.len();
+        gaps.push((lines.len(), n));
+        lines.push(String::new());
+    }
+
+    let mut handles = result.handles.clone();
+    let mut elided = 0usize;
+    if !gaps.is_empty() {
+        let mut all_dropped: Vec<String> = Vec::new();
+        for (idx, item) in result.items.iter().enumerate() {
+            if !included[idx] {
+                all_dropped.extend(item.lines.iter().cloned());
+            }
+        }
+        elided = all_dropped.len();
+        let joined = all_dropped.join(
+            "
+",
+        );
+        let href = opts.handles.put("elide", joined.as_bytes(), "text")?;
+        handles.push(crate::types::HandleRef {
+            id: href.id.clone(),
+            kind: href.kind.clone(),
+            bytes: href.bytes,
+            hash: href.hash.clone(),
+        });
+        for (i, n) in gaps {
+            lines[i] = format!("...+{n} lines ({})", href.id);
         }
     }
 
     let mut meta = result.meta.clone();
-    meta.redactions = meta.redactions.saturating_add(redactions);
+    for note in &mut meta.notes {
+        let (r, n) = opts.redactor.redact(note);
+        redactions += n;
+        *note = r;
+    }
+    meta.redactions = result.meta.redactions.saturating_add(redactions);
+
+    let mut diagnostics = result.diagnostics.clone();
+    for d in &mut diagnostics {
+        let (r, n) = opts.redactor.redact(&d.file);
+        redactions += n;
+        d.file = r;
+        let (r, n) = opts.redactor.redact(&d.message);
+        redactions += n;
+        d.message = r;
+        if let Some(code) = &d.code {
+            let (r, n) = opts.redactor.redact(code);
+            redactions += n;
+            d.code = Some(r);
+        }
+        if let Some(tool) = &d.tool {
+            let (r, n) = opts.redactor.redact(tool);
+            redactions += n;
+            d.tool = Some(r);
+        }
+    }
+
     let out = JsonOut {
         ok: result.meta.ok,
         tool: result.tool,
-        meta: &meta,
+        meta,
         data: JsonData {
             header,
             lines,
             elided_lines: elided,
         },
-        diagnostics: &result.diagnostics,
-        handles: &result.handles,
+        diagnostics,
+        handles,
         errors: Vec::new(),
     };
-    let text = serde_json::to_string(&out)? + "\n";
+    let text = serde_json::to_string(&out)?
+        + "
+";
     Ok(Rendered {
         out_tokens: estimator::estimate_text(&text),
         text,
