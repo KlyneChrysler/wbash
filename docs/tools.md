@@ -31,9 +31,11 @@ JSON schemas are generated from the same argument structs and exposed over MCP
   `limit`. Returns ranked matches; CLI accepts multiple positional paths and
   `-e/--regexp <pattern>` (e.g. `w search -e pat src tests`). Text mode retries
   safe `a|b` alternation on zero literal matches (`# '|' alternation`) or notes
-  `# '|' literal; try mode=regex`. Counts use singular/plural forms; zero-result
-  searches that skipped binary files note `# skipped N binary file(s)`. Files with
-  >=3 returned hits are grouped as `path (N):` with indented `line: snippet`.
+  `# '|' literal; try mode=regex`. Repeated identical searches may return
+  `unchanged search (N files, M matches)`. Counts use singular/plural forms;
+  zero-result searches that skipped binary files note
+  `# skipped N binary file(s)`. Files with >=3 returned hits are grouped as
+  `path (N):` with indented `line: snippet`.
 - `expand`: `ref="~id"`, `grep`, `lines`, `head`, `tail`, `offset=0`, `all=false`, `depth=0`. Non-`all` views are capped by `handles.expand_max_tokens` and emit `# remaining=N next_offset=M` when truncated. `all=true` emits full selected content (capped by its internal limits); `depth` inlines nested text handles.
 - `edit`: `path` plus exactly one operation: `find`+`replace` (unique literal
   match), `lines`+`content` (splice), `create=true`+`content`, `overwrite=true`
@@ -58,13 +60,15 @@ JSON schemas are generated from the same argument structs and exposed over MCP
   `push`) plus op fields: `pathspec`, `staged`/`cached`, `context` (`-U`,
   `--unified`), `stat`, `name_only`, `name_status`, `numstat`, `shortstat`,
   `limit`, `ref`, `path`, `lines`, `message`, `all`, `allow_empty`, `remote`,
-  `branch`, `set_upstream`. `commit` requires `git_write`; `push` requires
-  `git_write`. `log` accepts `-n <count>`, `-n<count>`, `--limit <count>` and
-  display-only `--oneline`/`--graph`/`--decorate`/`--no-pager`; other short
-  flags are rejected with a hint.
-- `batch`: `calls=[{tool, args}]`. Calls run serially; each result is delimited
-  (`#N tool ok|error`) and failures do not abort siblings. Nested `batch` is
-  rejected.
+  `branch`, `set_upstream`. `show` returns compact commit/file/hunk/change
+  summary; `blame` is capped by `limit` with omitted lines in a handle.
+  `commit` requires `git_write`; `push` requires `git_write`. `log` accepts
+  `-n <count>`, `-n<count>`, `--limit <count>` and display-only
+  `--oneline`/`--graph`/`--decorate`/`--no-pager`; other short flags are
+  rejected with a hint.
+- `batch`: `calls=[{tool, args}]`. Calls run serially; child results are
+  delimited (`#N tool ok|error`) when they include output or handles and
+  failures do not abort siblings. Nested `batch` is rejected.
 - `sh`: `command`, `cwd`, `timeout_ms`, `stdin`. CLI parses only wbash control
   flags for `sh` (`cwd`, `timeout_ms`, `stdin`); prefer `--` when command
   text/args are ambiguous. Requires `execute` tier and `exec.allow_shell=true`.
