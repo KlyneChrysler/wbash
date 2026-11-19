@@ -46,24 +46,58 @@ pub fn day_file(ts_ms: i64) -> PathBuf {
     stats_dir().join(format!("{y:04}-{m:02}-{d:02}.jsonl"))
 }
 
+fn with_stats_lock<T>(f: impl FnOnce() -> T) -> T {
+    let dir = stats_dir();
+    if paths::ensure_private_dir(&dir).is_err() {
+        return f();
+    }
+    let lock_path = dir.join(".stats.lock");
+    if let Ok(lock_file) = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+    {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = lock_file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            let rc = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
+            if rc == 0 {
+                let out = f();
+                unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_UN) };
+                return out;
+            }
+        }
+    }
+    f()
+}
+
 pub fn record(config: &Config, entry: &StatsEntry) {
     if !config.telemetry.local_stats {
         return;
     }
-    let dir = stats_dir();
-    if paths::ensure_private_dir(&dir).is_err() {
-        return;
-    }
-    let path = day_file(entry.ts_ms);
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        if let Ok(line) = serde_json::to_string(entry) {
-            let _ = writeln!(f, "{line}");
+    with_stats_lock(|| {
+        let dir = stats_dir();
+        if paths::ensure_private_dir(&dir).is_err() {
+            return;
         }
-    }
+        let path = day_file(entry.ts_ms);
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            if let Ok(line) = serde_json::to_string(entry) {
+                let _ = writeln!(f, "{line}");
+            }
+        }
+    });
 }
 
 pub fn record_result(config: &Config, result: &ToolResult, out_tokens: u32) {
@@ -91,24 +125,26 @@ pub fn audit(config: &Config, tool: &str, ok: bool, code: Option<&str>) {
     if !config.telemetry.audit_log {
         return;
     }
-    let dir = paths::cache_dir();
-    if paths::ensure_private_dir(&dir).is_err() {
-        return;
-    }
-    let path = dir.join("audit.jsonl");
-    let event = serde_json::json!({
-        "ts_ms": now_ms(),
-        "tool": tool,
-        "ok": ok,
-        "code": code,
+    with_stats_lock(|| {
+        let dir = paths::cache_dir();
+        if paths::ensure_private_dir(&dir).is_err() {
+            return;
+        }
+        let path = dir.join("audit.jsonl");
+        let event = serde_json::json!({
+            "ts_ms": now_ms(),
+            "tool": tool,
+            "ok": ok,
+            "code": code,
+        });
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(f, "{event}");
+        }
     });
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        let _ = writeln!(f, "{event}");
-    }
 }
 
 pub fn load_all() -> Vec<StatsEntry> {

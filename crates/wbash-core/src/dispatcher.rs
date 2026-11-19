@@ -235,47 +235,86 @@ impl Dispatcher {
         paths::cache_dir().join("ledger").join(name)
     }
 
-    fn load_ledger(&self, session_id: &str) -> Ledger {
-        let path = self.ledger_file(session_id);
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return Ledger::default();
-        };
-        let mut ledger: Ledger = serde_json::from_str(&text).unwrap_or_default();
-        ledger.expire(self.config.session.ledger_ttl_secs, now_ms());
-        ledger
+    fn ledger_lock_file(&self, session_id: &str) -> std::path::PathBuf {
+        self.ledger_file(session_id).with_extension("lock")
     }
 
-    fn save_ledger_bytes(&self, session_id: &str, text: &[u8]) {
-        let path = self.ledger_file(session_id);
-        if let Some(parent) = path.parent() {
-            if paths::ensure_private_dir(parent).is_err() {
-                return;
-            }
+    fn with_ledger_lock<T>(&self, session_id: &str, f: impl FnOnce() -> T) -> T {
+        let lock_path = self.ledger_lock_file(session_id);
+        if let Some(parent) = lock_path.parent() {
+            let _ = paths::ensure_private_dir(parent);
         }
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let tmp = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
-        let write = || -> std::io::Result<()> {
-            use std::io::Write;
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&tmp)?;
+        if let Ok(lock_file) = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+        {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+                let _ = lock_file.set_permissions(std::fs::Permissions::from_mode(0o600));
             }
-            f.write_all(text)?;
-            Ok(())
-        };
-        if write().is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
-        } else {
-            let _ = std::fs::remove_file(&tmp);
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::AsRawFd;
+                let rc = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
+                if rc == 0 {
+                    let out = f();
+                    unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_UN) };
+                    return out;
+                }
+            }
         }
+        f()
+    }
+
+    fn load_ledger(&self, session_id: &str) -> Ledger {
+        self.with_ledger_lock(session_id, || {
+            let path = self.ledger_file(session_id);
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                return Ledger::default();
+            };
+            let mut ledger: Ledger = serde_json::from_str(&text).unwrap_or_default();
+            ledger.expire(self.config.session.ledger_ttl_secs, now_ms());
+            ledger
+        })
+    }
+
+    fn save_ledger_bytes(&self, session_id: &str, text: &[u8]) {
+        self.with_ledger_lock(session_id, || {
+            let path = self.ledger_file(session_id);
+            if let Some(parent) = path.parent() {
+                if paths::ensure_private_dir(parent).is_err() {
+                    return;
+                }
+            }
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let tmp = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
+            let write = || -> std::io::Result<()> {
+                use std::io::Write;
+                let mut f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&tmp)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+                }
+                f.write_all(text)?;
+                Ok(())
+            };
+            if write().is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            } else {
+                let _ = std::fs::remove_file(&tmp);
+            }
+        });
     }
 
     fn prune_sessions(&mut self) {

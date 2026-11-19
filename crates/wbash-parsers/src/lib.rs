@@ -105,16 +105,18 @@ impl ParserRegistry {
                 let mut paths: Vec<_> = read.flatten().map(|e| e.path()).collect();
                 paths.sort();
                 for path in paths {
-                    if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-                        if let Ok(p) = TomlParser::load(&path) {
-                            entries.push(ParserEntry {
-                                name: p.name.clone(),
-                                priority: p.priority,
-                                inject: p.inject_args.clone(),
-                                inject_if_absent: None,
-                                kind: Kind::Toml(Box::new(p)),
-                            });
-                        }
+                    if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                        continue;
+                    }
+                    match TomlParser::load(&path) {
+                        Ok(p) => entries.push(ParserEntry {
+                            name: p.name.clone(),
+                            priority: p.priority,
+                            inject: p.inject_args.clone(),
+                            inject_if_absent: None,
+                            kind: Kind::Toml(Box::new(p)),
+                        }),
+                        Err(e) => eprintln!("# parser rule {} ignored: {e}", path.display()),
                     }
                 }
             }
@@ -1100,6 +1102,29 @@ impl TomlParser {
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default();
+        }
+        if p.schema_version != 1 {
+            return Err(wbash_core::WErr::invalid_args(
+                format!(
+                    "unsupported parser schema_version {} (expected 1)",
+                    p.schema_version
+                ),
+                "schema_version=1",
+            ));
+        }
+        if p.r#match.argv0.trim().is_empty() {
+            return Err(wbash_core::WErr::invalid_args(
+                "parser match.argv0 is required",
+                "match.argv0=<command>",
+            ));
+        }
+        if !p.parse.format.is_empty()
+            && !matches!(p.parse.format.as_str(), "json" | "jsonl" | "text")
+        {
+            return Err(wbash_core::WErr::invalid_args(
+                format!("unsupported parser parse.format '{}'", p.parse.format),
+                "parse.format=json|jsonl|text",
+            ));
         }
         p.inject_args = p.inject.args.clone();
         Ok(p)
