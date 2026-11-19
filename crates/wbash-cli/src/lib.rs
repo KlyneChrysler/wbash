@@ -1161,8 +1161,8 @@ fn print_help() {
     println!("  w tree src --depth 2");
     println!("  w read src/main.rs 1:40");
     println!("  w search parse_config src");
-    println!("  w run -- cargo test");
-    println!("  w git diff --staged");
+    println!("  w run -- cargo test -q");
+    println!("  w git diff --stat");
     println!("  w expand ~r7 --grep error");
 }
 
