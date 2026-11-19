@@ -303,7 +303,7 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
                     files += 1;
                     plus += parts[0].parse::<usize>().unwrap_or(0);
                     minus += parts[1].parse::<usize>().unwrap_or(0);
-                    r.high(parts[2].to_string());
+                    r.high(line.to_string());
                     continue;
                 }
             }
