@@ -44,26 +44,30 @@ JSON schemas are generated from the same argument structs and exposed over MCP
   by default; replaces all matches in scope. Returns per-file match counts;
   `--verbosity verbose` emits diff lines (budget-fitted). Writes are atomic per file.
 - `run`: `argv=[...]` (no shell), `cwd="."`, `timeout_ms`, `stdin`, `env`
-  (allowlisted keys only). Parsers consume injected/machine streams when used,
-  while rendered tails/`raw_text`/`full` handles use user-relevant output with
-  injected machine records stripped. Headers include parsed counts when known
-  (e.g. passed/warnings/errors); failures preserve error/test signals and terminal
-  summaries with compact tails and a `full: ~id` handle as needed. In `minimal` on clean success, output is summary-only when sufficient.
+  (allowlisted keys only). CLI parses only wbash control flags for `run`
+  (`cwd`, `timeout_ms`, `stdin`, `env`); pass child flags after `--` when
+  ambiguous. Parsers consume injected/machine streams when used, while rendered
+  tails/`raw_text`/`full` handles use user-relevant output with injected
+  machine records stripped. Headers include parsed counts when known
+  (e.g. passed/warnings/errors); failures preserve error/test signals and
+  terminal summaries with compact tails and a `full: ~id` handle as needed.
 - `check`: `kind="all"|"build"|"lint"|"type"|"test"`, `path="."`. Runs detected
   project commands (Cargo, npm scripts, pytest, go, ruff, tsc, etc.) and
   reports count-bearing headers (`ok, N warnings, N passed` / errors/failures).
 - `git`: `op` (`status`, `diff`, `log`, `show`, `blame`, `branch`, `commit`,
-  `push`) plus op fields: `pathspec`, `staged`, `context`, `limit`, `ref`,
-  `path`, `lines`, `message`, `all`, `allow_empty`, `remote`, `branch`,
-  `set_upstream`. `commit` requires `git_write`; `push` requires `git_write`.
-  `log` accepts `-n <count>`, `-n<count>`, `--limit <count>` and display-only
-  `--oneline`/`--graph`/`--decorate`/`--no-pager`; other short flags are
-  rejected with a hint.
+  `push`) plus op fields: `pathspec`, `staged`/`cached`, `context` (`-U`,
+  `--unified`), `stat`, `name_only`, `name_status`, `numstat`, `shortstat`,
+  `limit`, `ref`, `path`, `lines`, `message`, `all`, `allow_empty`, `remote`,
+  `branch`, `set_upstream`. `commit` requires `git_write`; `push` requires
+  `git_write`. `log` accepts `-n <count>`, `-n<count>`, `--limit <count>` and
+  display-only `--oneline`/`--graph`/`--decorate`/`--no-pager`; other short
+  flags are rejected with a hint.
 - `batch`: `calls=[{tool, args}]`. Calls run serially; each result is delimited
   (`#N tool ok|error`) and failures do not abort siblings. Nested `batch` is
   rejected.
-- `sh`: `command`, `cwd`, `timeout_ms`, `stdin`. Requires `execute` tier and
-  `exec.allow_shell=true`.
+- `sh`: `command`, `cwd`, `timeout_ms`, `stdin`. CLI parses only wbash control
+  flags for `sh` (`cwd`, `timeout_ms`, `stdin`); prefer `--` when command
+  text/args are ambiguous. Requires `execute` tier and `exec.allow_shell=true`.
 
 ## Errors
 

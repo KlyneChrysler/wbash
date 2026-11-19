@@ -33,7 +33,7 @@ w --tier git_write git commit -m "message"
 w expand ~id
 ```
 
-use `--` before args for `run` or values starting with `-`.
+use `--` before child args for `run`/`sh` when ambiguous. `run` CLI control flags: `--cwd`, `--timeout-ms`, `--stdin`, `--env`.
 
 ## mcp
 

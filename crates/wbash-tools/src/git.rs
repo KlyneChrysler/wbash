@@ -20,6 +20,18 @@ struct GitArgs {
     pathspec: Option<Value>,
     #[serde(default)]
     staged: bool,
+    #[serde(default)]
+    cached: bool,
+    #[serde(default)]
+    stat: bool,
+    #[serde(default)]
+    name_only: bool,
+    #[serde(default)]
+    name_status: bool,
+    #[serde(default)]
+    numstat: bool,
+    #[serde(default)]
+    shortstat: bool,
     context: Option<u32>,
     limit: Option<u32>,
     #[serde(rename = "ref")]
@@ -52,19 +64,25 @@ impl Tool for GitTool {
             "type": "object",
             "properties": {
                 "op": {"type": "string", "enum": ["status", "diff", "log", "show", "blame", "branch", "commit", "push"]},
-                "pathspec": {"type": ["string", "array"], "items": {"type": "string"}},
-                "staged": {"type": "boolean", "default": false},
-                "context": {"type": "integer", "minimum": 0, "maximum": 20},
-                "limit": {"type": "integer", "minimum": 1},
+                "pathspec": {"type": ["string", "array"]},
+                "staged": {"type": "boolean"},
+                "cached": {"type": "boolean"},
+                "stat": {"type": "boolean"},
+                "name_only": {"type": "boolean"},
+                "name_status": {"type": "boolean"},
+                "numstat": {"type": "boolean"},
+                "shortstat": {"type": "boolean"},
+                "context": {"type": "integer"},
+                "limit": {"type": "integer"},
                 "ref": {"type": "string"},
                 "path": {"type": "string"},
                 "lines": {"type": "string"},
                 "message": {"type": "string"},
-                "all": {"type": "boolean", "default": false},
-                "allow_empty": {"type": "boolean", "default": false},
+                "all": {"type": "boolean"},
+                "allow_empty": {"type": "boolean"},
                 "remote": {"type": "string"},
                 "branch": {"type": "string"},
-                "set_upstream": {"type": "boolean", "default": false}
+                "set_upstream": {"type": "boolean"}
             },
             "required": ["op"],
             "additionalProperties": false
@@ -203,9 +221,10 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
             "context=3",
         ));
     }
-    if a.staged && a.reference.is_some() {
+    let staged = a.staged || a.cached;
+    if a.reference.is_some() && staged {
         return Err(WErr::invalid_args(
-            "git diff: cannot combine --staged with ref",
+            "staged/cached cannot be combined with ref",
             "use ref=HEAD or --staged",
         ));
     }
@@ -214,6 +233,7 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     }
     let paths = pathspecs(a)?;
     let mut reference = a.reference.clone();
+    let mut final_paths = paths.clone();
     if reference.is_some() && paths.is_empty() {
         let r = reference.as_deref().unwrap_or_default();
         let verify = git(
@@ -225,72 +245,149 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
                 &format!("{r}^{{commit}}"),
             ],
         );
-        let is_ref = match verify {
-            Ok(o) => o.exit.is_success(),
-            Err(_) => false,
-        };
+        let is_ref = matches!(verify, Ok(o) if o.exit.is_success());
         if !is_ref {
-            // fall back: treat as pathspec (e.g. w git diff README.md)
+            final_paths = vec![r.to_string()];
             reference = None;
         }
     }
-    let mut argv: Vec<String> = vec![
-        "diff".to_string(),
-        "--no-color".to_string(),
-        format!("--unified={context}"),
-    ];
-    if a.staged {
+    let summary_mode = a.stat || a.name_only || a.name_status || a.numstat || a.shortstat;
+    let mut argv = vec!["diff".to_string(), "--no-color".to_string()];
+    if !summary_mode {
+        argv.push(format!("--unified={context}"));
+    }
+    if staged {
         argv.push("--cached".to_string());
+    }
+    if a.stat {
+        argv.push("--stat".to_string());
+    }
+    if a.numstat {
+        argv.push("--numstat".to_string());
+    }
+    if a.shortstat {
+        argv.push("--shortstat".to_string());
+    }
+    if a.name_only {
+        argv.push("--name-only".to_string());
+    }
+    if a.name_status {
+        argv.push("--name-status".to_string());
     }
     if let Some(r) = &reference {
         argv.push(r.clone());
     }
-    let final_paths = if reference.is_none() && a.reference.is_some() && paths.is_empty() {
-        vec![a.reference.clone().unwrap_or_default()]
-    } else {
-        paths
-    };
     if !final_paths.is_empty() {
         argv.push("--".to_string());
         argv.extend(final_paths);
     }
-    let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
-    let out = git(ctx, &refs).map_err(map_git_err)?;
+    let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let out = git(ctx, &argv_refs).map_err(map_git_err)?;
     if !out.exit.is_success() {
         return Err(git_failure("diff", &out));
     }
+    let text = out.stdout_str();
     let mut r = ToolResult::new("git", String::new());
-    let mut files = 0usize;
-    let mut plus = 0usize;
-    let mut minus = 0usize;
-    for line in out.stdout_str().lines() {
-        if let Some(rest) = line.strip_prefix("diff --git ") {
-            let name = rest.rsplit(" b/").next().unwrap_or(rest).trim().to_string();
-            files += 1;
-            r.must(format!("diff {name}"));
-            continue;
-        }
-        if line.starts_with("@@") {
-            r.high(line.to_string());
-        } else if line.starts_with("+++") || line.starts_with("---") {
-            continue;
-        } else if let Some(rest) = line.strip_prefix('+') {
-            plus += 1;
-            r.low(format!("+{rest}"));
-        } else if let Some(rest) = line.strip_prefix('-') {
-            minus += 1;
-            r.low(format!("-{rest}"));
-        } else if line.starts_with(' ') && ctx.config.output.verbosity == "verbose" {
+    if summary_mode {
+        let mut files = 0usize;
+        let mut plus = 0usize;
+        let mut minus = 0usize;
+        let mut summary_line = String::new();
+        for line in text.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if a.numstat {
+                let parts: Vec<&str> = line.splitn(3, '\t').collect();
+                if parts.len() == 3 {
+                    files += 1;
+                    plus += parts[0].parse::<usize>().unwrap_or(0);
+                    minus += parts[1].parse::<usize>().unwrap_or(0);
+                    r.high(parts[2].to_string());
+                    continue;
+                }
+            }
+            if a.shortstat
+                || line.contains("file changed")
+                || line.contains("files changed")
+                || line.contains(" insertion")
+                || line.contains(" deletion")
+            {
+                summary_line = line.trim().to_string();
+                continue;
+            }
+            if a.name_only || a.name_status {
+                files += 1;
+                r.high(line.to_string());
+                continue;
+            }
+            if a.stat {
+                if line.contains(" | ") {
+                    files += 1;
+                    r.high(line.trim_end().to_string());
+                } else {
+                    summary_line = line.trim().to_string();
+                }
+                continue;
+            }
             r.low(line.to_string());
         }
+        if !summary_line.is_empty() {
+            r.header = summary_line.clone();
+            r.must(summary_line);
+        } else if text.trim().is_empty() {
+            r.header = "0 changed".to_string();
+        } else if files > 0 {
+            r.header = if a.numstat && (plus > 0 || minus > 0) {
+                format!("{files} files, +{plus} -{minus}")
+            } else {
+                format!("{files} files")
+            };
+        } else {
+            r.header = text
+                .lines()
+                .next()
+                .unwrap_or("0 changed")
+                .trim()
+                .to_string();
+        }
+    } else {
+        let mut files = 0usize;
+        let mut plus = 0usize;
+        let mut minus = 0usize;
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("diff --git ") {
+                files += 1;
+                r.high(rest.to_string());
+                continue;
+            }
+            if line.starts_with("@@") {
+                r.high(line.to_string());
+                continue;
+            }
+            if line.starts_with("+++") || line.starts_with("---") {
+                r.low(line.to_string());
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix('+') {
+                plus += 1;
+                r.low(format!("+{rest}"));
+            } else if let Some(rest) = line.strip_prefix('-') {
+                minus += 1;
+                r.low(format!("-{rest}"));
+            } else {
+                r.low(line.to_string());
+            }
+        }
+        r.header = if text.trim().is_empty() {
+            "0 changed, +0 -0".to_string()
+        } else {
+            format!("{files} files, +{plus} -{minus}")
+        };
     }
-    r.header = format!("{files} changed, +{plus} -{minus}");
     if out.truncated {
         r.note("output_truncated");
     }
-    r.meta.counts.insert("files".into(), files as i64);
-    r.meta.counts.insert("insertions".into(), plus as i64);
-    r.meta.counts.insert("deletions".into(), minus as i64);
     Ok(r)
 }
 

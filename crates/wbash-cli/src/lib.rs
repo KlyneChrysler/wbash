@@ -57,6 +57,12 @@ const BOOLEANS: &[&str] = &[
     "regex",
     "dry_run",
     "dry-run",
+    "cached",
+    "stat",
+    "name-only",
+    "name-status",
+    "numstat",
+    "shortstat",
 ];
 
 pub fn run(argv: Vec<String>) -> i32 {
@@ -379,6 +385,48 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
                     continue;
                 }
             }
+            if tok == "-U" {
+                i += 1;
+                if i >= tokens.len() {
+                    return Err(WErr::invalid_args(
+                        "-U requires a number",
+                        "w git diff -U <n>",
+                    ));
+                }
+                let n = parse_count(&tokens[i], "-U")?;
+                obj.insert("context".into(), Value::Number((n as i64).into()));
+                i += 1;
+                continue;
+            }
+            if let Some(nstr) = tok.strip_prefix("-U") {
+                if !nstr.is_empty() && nstr.chars().all(|c| c.is_ascii_digit()) {
+                    let n = parse_count(nstr, "-U")?;
+                    obj.insert("context".into(), Value::Number((n as i64).into()));
+                    i += 1;
+                    continue;
+                }
+            }
+            if tok == "--unified" {
+                i += 1;
+                if i >= tokens.len() {
+                    return Err(WErr::invalid_args(
+                        "--unified requires a number",
+                        "w git diff --unified <n>",
+                    ));
+                }
+                let n = parse_count(&tokens[i], "--unified")?;
+                obj.insert("context".into(), Value::Number((n as i64).into()));
+                i += 1;
+                continue;
+            }
+            if let Some(nstr) = tok.strip_prefix("--unified=") {
+                if !nstr.is_empty() {
+                    let n = parse_count(nstr, "--unified")?;
+                    obj.insert("context".into(), Value::Number((n as i64).into()));
+                    i += 1;
+                    continue;
+                }
+            }
         }
         if tool == "search" && (tok == "-e" || tok == "--regexp") {
             i += 1;
@@ -404,6 +452,11 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
         }
         if tok.starts_with("--no-") {
             let key = kebab_to_snake(tok.trim_start_matches("--no-"));
+            if matches!(tool, "run" | "sh") {
+                positionals.push(tok.clone());
+                i += 1;
+                continue;
+            }
             insert_value(&mut obj, &key, Value::Bool(false));
             i += 1;
             continue;
@@ -433,6 +486,15 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
                 continue;
             }
             let key = kebab_to_snake(raw_key);
+            let run_control = matches!(tool, "run")
+                && matches!(key.as_str(), "cwd" | "timeout_ms" | "stdin" | "env");
+            let sh_control =
+                matches!(tool, "sh") && matches!(key.as_str(), "cwd" | "timeout_ms" | "stdin");
+            if matches!(tool, "run" | "sh") && !run_control && !sh_control {
+                positionals.push(tok.clone());
+                i += 1;
+                continue;
+            }
             if key == "env" {
                 let v = match inline {
                     Some(v) => v,
@@ -533,6 +595,7 @@ fn is_known_arg_key(key: &str) -> bool {
             | "argv"
             | "branch"
             | "budget"
+            | "cached"
             | "calls_file"
             | "content"
             | "context"
@@ -555,6 +618,9 @@ fn is_known_arg_key(key: &str) -> bool {
             | "max_files"
             | "message"
             | "mode"
+            | "name_only"
+            | "name_status"
+            | "numstat"
             | "offset"
             | "op"
             | "outline"
@@ -569,9 +635,11 @@ fn is_known_arg_key(key: &str) -> bool {
             | "remote"
             | "replace"
             | "set_upstream"
+            | "shortstat"
             | "sizes"
             | "staged"
             | "start"
+            | "stat"
             | "stdin"
             | "symbol"
             | "tail"
@@ -777,7 +845,19 @@ fn build_git_args(obj: &mut Map<String, Value>, pos: &[String]) -> Result<()> {
                 }
             } else if !rest.is_empty() && !obj.contains_key("pathspec") && !obj.contains_key("ref")
             {
-                if rest.len() == 1 {
+                if rest.iter().any(|t| t.starts_with('-')) {
+                    let paths: Vec<String> = rest
+                        .iter()
+                        .filter(|t| !t.starts_with('-'))
+                        .cloned()
+                        .collect();
+                    if !paths.is_empty() {
+                        obj.insert(
+                            "pathspec".into(),
+                            Value::Array(paths.into_iter().map(Value::String).collect()),
+                        );
+                    }
+                } else if rest.len() == 1 {
                     obj.insert("ref".into(), Value::String(rest[0].clone()));
                 } else {
                     obj.insert("ref".into(), Value::String(rest[0].clone()));
