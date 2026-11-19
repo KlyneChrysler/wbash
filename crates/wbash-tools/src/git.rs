@@ -7,9 +7,10 @@ use wbash_core::args::{parse_args, parse_line_range};
 use wbash_core::error::{Result, WErr};
 use wbash_core::policy;
 use wbash_core::registry::{Tool, ToolContext};
-use wbash_core::types::{format_duration_ms, Tier, ToolResult};
+use wbash_core::types::{format_duration_ms, HandleRef, Tier, ToolResult};
 
 use crate::run::execute_with_parsers;
+use crate::util;
 
 pub struct GitTool;
 
@@ -446,7 +447,6 @@ fn show(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     let mut args: Vec<String> = vec![
         "show".to_string(),
         "--no-color".to_string(),
-        "--stat".to_string(),
         "--pretty=format:%h%x09%ad%x09%an%x09%s".to_string(),
         "--date=short".to_string(),
         reference.clone(),
@@ -461,21 +461,69 @@ fn show(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
     if !out.exit.is_success() {
         return Err(git_failure("show", &out));
     }
-    let stdout = out.stdout_str();
+    let text = out.stdout_str();
     let mut r = ToolResult::new("git", format!("show {reference}"));
-    r.raw_text = Some(stdout.to_string());
-    for line in stdout.lines() {
+    let mut files = 0usize;
+    let mut plus = 0usize;
+    let mut minus = 0usize;
+    let mut commit_summary = None;
+    for line in text.lines() {
+        if commit_summary.is_none() {
+            let t = line.trim();
+            if t.is_empty() {
+                continue;
+            }
+            commit_summary = Some(t.to_string());
+            continue;
+        }
         if line.starts_with("diff --git") {
+            files += 1;
             let name = line
                 .strip_prefix("diff --git ")
                 .and_then(|rest| rest.rsplit(" b/").next())
                 .unwrap_or(line)
-                .trim();
-            r.must(format!("diff {name}"));
-        } else if line.starts_with("@@") {
+                .trim()
+                .to_string();
+            r.high(name);
+            continue;
+        }
+        if line.starts_with("@@") {
             r.high(line.to_string());
-        } else {
+            continue;
+        }
+        if line.starts_with("index ")
+            || line.starts_with("+++ ")
+            || line.starts_with("--- ")
+            || line.starts_with("new file ")
+            || line.starts_with("deleted file ")
+            || line.starts_with("rename ")
+            || line.starts_with("old mode ")
+            || line.starts_with("new mode ")
+            || line.starts_with("similarity index ")
+            || line.starts_with("dissimilarity index ")
+            || line.starts_with("\\ No newline")
+            || line.starts_with(' ')
+        {
+            continue;
+        }
+        if line.starts_with('+') {
+            plus += 1;
             r.low(line.to_string());
+            continue;
+        }
+        if line.starts_with('-') {
+            minus += 1;
+            r.low(line.to_string());
+            continue;
+        }
+    }
+    if let Some(s) = commit_summary {
+        r.must(s);
+        if files > 0 {
+            r.header = format!(
+                "show {reference}, {}, +{plus} -{minus}",
+                util::plural(files, "file")
+            );
         }
     }
     if out.truncated {
@@ -507,14 +555,19 @@ fn blame(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
         return Err(git_failure("blame", &out));
     }
     let mut r = ToolResult::new("git", format!("blame {display}"));
+    let limit = a
+        .limit
+        .unwrap_or(ctx.config.search.default_limit)
+        .min(ctx.config.search.max_limit) as usize;
     let mut sha = String::new();
     let mut author = String::new();
     let mut final_line = String::new();
     let mut count = 0usize;
+    let mut lines_out = Vec::new();
     for line in out.stdout_str().lines() {
         if line.starts_with('\t') {
             count += 1;
-            r.low(format!(
+            lines_out.push(format!(
                 "{final_line} {} {}: {}",
                 &sha[..sha.len().min(8)],
                 author,
@@ -535,6 +588,22 @@ fn blame(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
         if let Some(v) = line.strip_prefix("author ") {
             author = v.to_string();
         }
+    }
+    let returned = lines_out.len().min(limit);
+    for l in lines_out.iter().take(returned) {
+        r.low(l.clone());
+    }
+    if lines_out.len() > returned {
+        let omitted = lines_out.len() - returned;
+        let body = lines_out[returned..].join("\n");
+        let h = ctx.handles.put("git_blame", body.as_bytes(), "text")?;
+        r.must(format!("...+{omitted} more ({})", h.id));
+        r.handle(HandleRef {
+            id: h.id.clone(),
+            kind: h.kind.clone(),
+            bytes: h.bytes,
+            hash: h.hash.clone(),
+        });
     }
     r.meta.counts.insert("lines".into(), count as i64);
     Ok(r)

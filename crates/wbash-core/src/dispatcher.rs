@@ -186,7 +186,25 @@ impl Dispatcher {
         stats::record_result(&self.config, &result, rendered.out_tokens);
         stats::audit(&self.config, tool, result.meta.ok, None);
 
+        let mut mutating = match self.registry.get(tool) {
+            Some(t) => {
+                t.min_tier() >= Tier::WriteWorkspace
+                    || matches!(tool, "run" | "sh" | "check" | "batch")
+            }
+            None => false,
+        };
+        if tool == "git" {
+            if let Some(op) = tool_args.get("op").and_then(|v| v.as_str()) {
+                if matches!(op, "commit" | "push") {
+                    mutating = true;
+                }
+            }
+        }
+
         if let Some(session) = self.sessions.get_mut(&key) {
+            if result.meta.ok && mutating {
+                session.ledger.invalidate_searches();
+            }
             session.last_seen_ms = now_ms();
             session
                 .ledger

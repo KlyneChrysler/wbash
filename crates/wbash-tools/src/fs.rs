@@ -811,6 +811,7 @@ impl Tool for EditTool {
             std::fs::remove_file(&abs)
                 .map_err(|e| WErr::new("permission_denied", format!("delete {display}: {e}")))?;
             ctx.ledger.invalidate_path(&display);
+            ctx.ledger.invalidate_searches();
             ctx.workspace.invalidate();
             let mut r = ToolResult::new("edit", format!("deleted {display}"));
             r.meta.counts.insert("deleted".into(), 1);
@@ -830,6 +831,7 @@ impl Tool for EditTool {
             }
             util::atomic_write(&abs, content.as_bytes())?;
             ctx.ledger.invalidate_path(&display);
+            ctx.ledger.invalidate_searches();
             ctx.workspace.invalidate();
             let short = hash::short(&hash::hash_str(&content));
             let mut r = ToolResult::new(
@@ -969,6 +971,7 @@ impl Tool for EditTool {
         };
         util::atomic_write(&abs, &bytes)?;
         ctx.ledger.invalidate_path(&display);
+        ctx.ledger.invalidate_searches();
         if let Ok(meta) = std::fs::metadata(&abs) {
             let m = meta
                 .modified()

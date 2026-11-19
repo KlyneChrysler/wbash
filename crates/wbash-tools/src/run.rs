@@ -287,9 +287,12 @@ pub fn record_output(
                     // prefer tail summary lines (e.g. "test result: ok...")
                     for l in lines.iter().rev().take(4).rev() {
                         if l.contains("test result")
-                            || l.contains("passed")
-                            || l.contains("ok")
+                            || l.contains(" passed")
+                            || l.starts_with("ok")
                             || l.starts_with("Finished")
+                            || l.contains("warning:")
+                            || l.contains("error:")
+                            || l.contains("failed")
                         {
                             result.low((*l).to_string());
                         }

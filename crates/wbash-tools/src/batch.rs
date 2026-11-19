@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 
 use wbash_core::args::parse_args;
 use wbash_core::error::{Result, WErr};
+use wbash_core::estimator;
 use wbash_core::formatter::{self, RenderOptions};
 use wbash_core::registry::{invoke_tool, precheck, Tool, ToolContext};
 use wbash_core::types::{Format, HandleRef, Item, ItemClass, Tier, ToolResult};
@@ -89,20 +90,24 @@ impl Tool for BatchTool {
         }
 
         let n = a.calls.len();
-        let per_child = (ctx.budget.saturating_sub(40) / n as u32).max(64);
         let mut result = ToolResult::new("batch", String::new());
         let mut ok_count = 0usize;
         let mut err_count = 0usize;
 
         for (i, call) in a.calls.iter().enumerate() {
+            let remaining = n.saturating_sub(i) as u32;
+            let used = {
+                let mut t = estimator::estimate_text(&result.header);
+                for it in &result.items {
+                    t = t.saturating_add(estimator::estimate_lines(&it.lines));
+                }
+                t
+            };
+            let budget_left = ctx.budget.saturating_sub(used);
+            let per_child = (budget_left.saturating_sub(24) / remaining.max(1)).max(48);
             match invoke_tool(ctx.registry, &call.tool, &call.args, ctx) {
                 Ok(child) => {
                     ok_count += 1;
-                    result.push(Item::new(
-                        ItemClass::High,
-                        5.0,
-                        vec![format!("#{} {} ok", i + 1, call.tool)],
-                    ));
                     let rendered = formatter::render(
                         &child,
                         RenderOptions {
@@ -115,8 +120,13 @@ impl Tool for BatchTool {
                             verbosity: Some(ctx.config.output.verbosity.clone()),
                         },
                     )?;
-                    for line in rendered.text.lines() {
-                        result.low(line.to_string());
+                    let header = format!("#{} {} ok", i + 1, call.tool);
+                    let lines: Vec<String> = rendered.text.lines().map(|l| l.to_string()).collect();
+                    if !lines.is_empty() || !child.handles.is_empty() {
+                        result.push(Item::new(ItemClass::High, 5.0, vec![header]));
+                        for line in lines {
+                            result.low(line);
+                        }
                     }
                     for h in &child.handles {
                         if !result.handles.iter().any(|x| x.id == h.id) {

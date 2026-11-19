@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use wbash_core::args::parse_args;
 use wbash_core::error::{Result, WErr};
 use wbash_core::registry::{Tool, ToolContext};
-use wbash_core::types::{HandleRef, Item, ItemClass, Tier, ToolResult};
+use wbash_core::types::{now_ms, HandleRef, Item, ItemClass, SearchSeen, Tier, ToolResult};
 
 use crate::util;
 
@@ -122,6 +122,46 @@ impl Tool for SearchTool {
                 let base = ctx.resolve(p, true)?;
                 bases_rel.push(ctx.rel(&base));
             }
+        }
+        let mut cache_bases = bases_rel.clone();
+        cache_bases.sort();
+        let cache_key = format!(
+            "{}\0{}\0{}\0{}\0{}\0{}",
+            a.pattern,
+            a.mode,
+            cache_bases.join("\0"),
+            a.glob.clone().unwrap_or_default(),
+            a.context,
+            limit
+        );
+        if let Some(seen) = ctx
+            .ledger
+            .search_entry(&cache_key, ctx.config.session.ledger_ttl_secs, now_ms())
+            .cloned()
+        {
+            let snap_ok = seen
+                .snapshot_ref
+                .as_deref()
+                .map(|id| ctx.handles.get(id).is_ok())
+                .unwrap_or(false);
+            let header = if let (Some(id), true) = (&seen.snapshot_ref, snap_ok) {
+                format!(
+                    "unchanged search ({}, {}) expand {}",
+                    util::plural(seen.files, "file"),
+                    util::plural(seen.matches, "match"),
+                    id
+                )
+            } else {
+                format!(
+                    "unchanged search ({}, {})",
+                    util::plural(seen.files, "file"),
+                    util::plural(seen.matches, "match")
+                )
+            };
+            let mut r = ToolResult::new("search", header);
+            r.meta.counts.insert("files".into(), seen.files as i64);
+            r.meta.counts.insert("matches".into(), seen.matches as i64);
+            return Ok(r);
         }
         let gs = util::globset(a.glob.as_deref())?;
         let regex = if a.mode == "regex" {
@@ -398,6 +438,15 @@ impl Tool for SearchTool {
             .meta
             .counts
             .insert("scanned".into(), stats.scanned_files as i64);
+        ctx.ledger.record_search(
+            cache_key,
+            SearchSeen {
+                snapshot_ref: None,
+                files: stats.files_with_hits,
+                matches: total,
+                shown_ms: now_ms(),
+            },
+        );
         Ok(result)
     }
 }
@@ -440,6 +489,10 @@ fn scan_symbol(
 ) {
     for f in walk.files.iter() {
         if !filter(&f.rel) {
+            continue;
+        }
+        if wbash_index::is_known_binary_ext(&f.rel) || f.size > 2_000_000 {
+            stats.skipped_binary += 1;
             continue;
         }
         stats.scanned_files += 1;
@@ -510,6 +563,10 @@ fn scan_lines(
 ) {
     for f in walk.files.iter() {
         if !filter(&f.rel) {
+            continue;
+        }
+        if wbash_index::is_known_binary_ext(&f.rel) || f.size > 2_000_000 {
+            stats.skipped_binary += 1;
             continue;
         }
         stats.scanned_files += 1;

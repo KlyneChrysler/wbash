@@ -379,7 +379,9 @@ pub struct ReadSeen {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchSeen {
-    pub result_hash: String,
+    pub snapshot_ref: Option<String>,
+    pub files: usize,
+    pub matches: usize,
     pub shown_ms: i64,
 }
 
@@ -392,8 +394,11 @@ pub struct RunSeen {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Ledger {
+    #[serde(default)]
     pub reads: BTreeMap<String, ReadSeen>,
+    #[serde(default)]
     pub searches: BTreeMap<String, SearchSeen>,
+    #[serde(default)]
     pub runs: BTreeMap<String, RunSeen>,
 }
 
@@ -424,6 +429,22 @@ impl Ledger {
     pub fn touched(&self, path: &str) -> bool {
         let prefix = format!("{path}#");
         self.reads.keys().any(|k| k.starts_with(&prefix))
+    }
+
+    pub fn search_entry(&self, key: &str, ttl_secs: u64, now_ms: i64) -> Option<&SearchSeen> {
+        let e = self.searches.get(key)?;
+        if now_ms - e.shown_ms > (ttl_secs as i64) * 1000 {
+            return None;
+        }
+        Some(e)
+    }
+
+    pub fn record_search(&mut self, key: String, seen: SearchSeen) {
+        self.searches.insert(key, seen);
+    }
+
+    pub fn invalidate_searches(&mut self) {
+        self.searches.clear();
     }
 
     pub fn expire(&mut self, ttl_secs: u64, now_ms: i64) {

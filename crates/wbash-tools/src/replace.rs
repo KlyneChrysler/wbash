@@ -271,6 +271,9 @@ impl Tool for ReplaceTool {
             if remaining_limit == Some(0) {
                 break;
             }
+            if wbash_index::is_known_binary_ext(&f.rel) || f.size > 2_000_000 {
+                continue;
+            }
             let Ok(tf) = ctx.workspace.read_cached_text(f) else {
                 continue;
             };
@@ -352,6 +355,7 @@ impl Tool for ReplaceTool {
                     ctx.workspace.invalidate_file(&p.rel, meta.len(), m);
                 }
             }
+            ctx.ledger.invalidate_searches();
         }
 
         let header = if a.dry_run {
