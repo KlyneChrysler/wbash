@@ -542,8 +542,15 @@ impl Tool for ReadTool {
             if outline.heuristic {
                 r.note("heuristic_outline");
             }
+            let mut outline_shown = 0usize;
+            let mut outline_skipped = 0usize;
+            const MAX_OUTLINE_LINES: usize = 50;
             for s in &outline.symbols {
                 if s.start_line <= head {
+                    continue;
+                }
+                if outline_shown >= MAX_OUTLINE_LINES {
+                    outline_skipped += 1;
                     continue;
                 }
                 let pad = " ".repeat(s.indent.min(40));
@@ -552,6 +559,10 @@ impl Tool for ReadTool {
                     4.0,
                     vec![format!("{pad}{}: {} {}", s.start_line, s.kind, s.name)],
                 ));
+                outline_shown += 1;
+            }
+            if outline_skipped > 0 {
+                r.low(format!("+{outline_skipped} more symbols ({})", h.id));
             }
             record_read_snapshot(
                 ctx,
