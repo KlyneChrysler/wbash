@@ -355,18 +355,34 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
         let mut files = 0usize;
         let mut plus = 0usize;
         let mut minus = 0usize;
+        let mut seen_file = std::collections::HashSet::new();
         for line in text.lines() {
             if let Some(rest) = line.strip_prefix("diff --git ") {
                 files += 1;
-                r.high(rest.to_string());
+                let name = rest
+                    .split_whitespace()
+                    .last()
+                    .map(|s| s.trim_start_matches("b/"))
+                    .unwrap_or(rest)
+                    .to_string();
+                if seen_file.insert(name.clone()) {
+                    r.high(name);
+                }
                 continue;
             }
             if line.starts_with("@@") {
                 r.high(line.to_string());
                 continue;
             }
-            if line.starts_with("+++") || line.starts_with("---") {
-                r.low(line.to_string());
+            if line.starts_with("index ")
+                || line.starts_with("+++ ")
+                || line.starts_with("--- ")
+                || line.starts_with("new file mode")
+                || line.starts_with("deleted file mode")
+                || line.starts_with("old mode")
+                || line.starts_with("new mode")
+                || line.starts_with(' ')
+            {
                 continue;
             }
             if let Some(rest) = line.strip_prefix('+') {
@@ -375,7 +391,7 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
             } else if let Some(rest) = line.strip_prefix('-') {
                 minus += 1;
                 r.low(format!("-{rest}"));
-            } else {
+            } else if line == "\\ No newline at end of file" {
                 r.low(line.to_string());
             }
         }
