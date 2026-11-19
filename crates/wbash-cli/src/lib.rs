@@ -393,14 +393,18 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
                         "w git diff -U <n>",
                     ));
                 }
-                let n = parse_count(&tokens[i], "-U")?;
+                let n: u32 = tokens[i].parse().map_err(|_| {
+                    WErr::invalid_args(format!("bad -U value '{}'", tokens[i]), "-U <number>")
+                })?;
                 obj.insert("context".into(), Value::Number((n as i64).into()));
                 i += 1;
                 continue;
             }
             if let Some(nstr) = tok.strip_prefix("-U") {
                 if !nstr.is_empty() && nstr.chars().all(|c| c.is_ascii_digit()) {
-                    let n = parse_count(nstr, "-U")?;
+                    let n: u32 = nstr.parse().map_err(|_| {
+                        WErr::invalid_args(format!("bad -U value '{nstr}'"), "-U<number>")
+                    })?;
                     obj.insert("context".into(), Value::Number((n as i64).into()));
                     i += 1;
                     continue;
@@ -414,14 +418,24 @@ fn parse_tool_args(tokens: &[String], tool: &str) -> Result<ParsedToolArgs> {
                         "w git diff --unified <n>",
                     ));
                 }
-                let n = parse_count(&tokens[i], "--unified")?;
+                let n: u32 = tokens[i].parse().map_err(|_| {
+                    WErr::invalid_args(
+                        format!("bad --unified value '{}'", tokens[i]),
+                        "--unified <number>",
+                    )
+                })?;
                 obj.insert("context".into(), Value::Number((n as i64).into()));
                 i += 1;
                 continue;
             }
             if let Some(nstr) = tok.strip_prefix("--unified=") {
                 if !nstr.is_empty() {
-                    let n = parse_count(nstr, "--unified")?;
+                    let n: u32 = nstr.parse().map_err(|_| {
+                        WErr::invalid_args(
+                            format!("bad --unified value '{nstr}'"),
+                            "--unified=<number>",
+                        )
+                    })?;
                     obj.insert("context".into(), Value::Number((n as i64).into()));
                     i += 1;
                     continue;
