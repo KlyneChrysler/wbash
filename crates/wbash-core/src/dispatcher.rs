@@ -327,10 +327,15 @@ impl Dispatcher {
                 f.write_all(text)?;
                 Ok(())
             };
-            if write().is_ok() {
-                let _ = std::fs::rename(&tmp, &path);
-            } else {
-                let _ = std::fs::remove_file(&tmp);
+            match write() {
+                Ok(()) => {
+                    if std::fs::rename(&tmp, &path).is_err() {
+                        let _ = std::fs::remove_file(&tmp);
+                    }
+                }
+                Err(_) => {
+                    let _ = std::fs::remove_file(&tmp);
+                }
             }
         });
     }

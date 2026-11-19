@@ -274,6 +274,15 @@ impl Tool for SearchTool {
                 )
             },
         );
+        ctx.ledger.record_search(
+            cache_key,
+            SearchSeen {
+                snapshot_ref: None,
+                files: stats.files_with_hits,
+                matches: total,
+                shown_ms: now_ms(),
+            },
+        );
         if total == 1
             && !truncated
             && !stats.fallback
@@ -438,15 +447,6 @@ impl Tool for SearchTool {
             .meta
             .counts
             .insert("scanned".into(), stats.scanned_files as i64);
-        ctx.ledger.record_search(
-            cache_key,
-            SearchSeen {
-                snapshot_ref: None,
-                files: stats.files_with_hits,
-                matches: total,
-                shown_ms: now_ms(),
-            },
-        );
         Ok(result)
     }
 }
