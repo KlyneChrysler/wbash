@@ -23,7 +23,7 @@ impl McpServer {
             eprintln!("# {w}");
         }
         let registry = Arc::new(wbash_tools::registry());
-        let parsers = Arc::new(ParserRegistry::new());
+        let parsers = Arc::new(ParserRegistry::for_root(root, no_project_config));
         let dispatcher = Dispatcher::new(cfg, root, registry, parsers)?;
         Ok(Self { dispatcher })
     }

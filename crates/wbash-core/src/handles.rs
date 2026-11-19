@@ -116,8 +116,9 @@ impl HandleStore {
 
     pub fn get(&mut self, id: &str) -> Result<(Vec<u8>, HandleRecord)> {
         let _lock = self.lock(false)?;
+        self.reload_manifest_if_changed()?;
         let now = now_ms();
-        let mut rec = self.handles.get(id).cloned().ok_or_else(|| {
+        let rec = self.handles.get(id).cloned().ok_or_else(|| {
             WErr::with_hint(
                 "handle_not_found",
                 format!("no handle '{id}' in this session"),
@@ -127,8 +128,12 @@ impl HandleStore {
         if now > rec.expires_ms {
             drop(_lock);
             let _x = self.lock(true)?;
-            self.remove_locked(id);
-            self.rewrite_manifest_locked()?;
+            self.reload_manifest_if_changed()?;
+            let rec2 = self.handles.get(id).cloned();
+            if rec2.as_ref().is_some_and(|r| now_ms() > r.expires_ms) || rec2.is_none() {
+                self.remove_locked(id);
+                self.rewrite_manifest_locked()?;
+            }
             return Err(WErr::with_hint(
                 "handle_expired",
                 format!("handle '{id}' expired"),
@@ -143,8 +148,10 @@ impl HandleStore {
                 "re-run the tool that produced it",
             )
         })?;
-        rec.last_access_ms = now;
-        self.handles.insert(id.to_string(), rec.clone());
+        let rec = HandleRecord {
+            last_access_ms: now,
+            ..rec
+        };
         Ok((bytes, rec))
     }
 

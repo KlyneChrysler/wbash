@@ -28,8 +28,8 @@ emitted.
 
 ## TOML parsers (v1)
 
-User rules: `~/.config/w-bash/parsers.d/*.toml`.
-Project rules: `.w-bash/parsers.d/*.toml` (trusted projects only).
+User rules: `~/.config/w-bash/rules.d/*.toml` or `~/.config/w-bash/parsers.d/*.toml`.
+Project rules: `<root>/.w-bash/rules.d/*.toml` or `<root>/.w-bash/parsers.d/*.toml` (trusted root only, disabled by `--no-project-config`).
 Lower `priority` wins among matches.
 
 ```toml

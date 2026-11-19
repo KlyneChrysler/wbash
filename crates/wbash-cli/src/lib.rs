@@ -241,7 +241,11 @@ pub fn build_dispatcher(global: &Global, with_parsers: bool) -> Result<Dispatche
     }
     let registry = Arc::new(wbash_tools::registry());
     if with_parsers {
-        Dispatcher::new(cfg, &global.root, registry, Arc::new(ParserRegistry::new()))
+        let parsers = Arc::new(ParserRegistry::for_root(
+            &global.root,
+            global.no_project_config,
+        ));
+        Dispatcher::new(cfg, &global.root, registry, parsers)
     } else {
         Dispatcher::new(cfg, &global.root, registry, Arc::new(NoParsers))
     }

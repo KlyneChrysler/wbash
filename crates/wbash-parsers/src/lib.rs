@@ -45,6 +45,15 @@ impl Default for ParserRegistry {
 
 impl ParserRegistry {
     pub fn new() -> Self {
+        Self::load(None, false)
+    }
+
+    pub fn for_root(root: &Path, no_project_config: bool) -> Self {
+        let include_project = !no_project_config && wbash_core::config::is_trusted(root);
+        Self::load(Some(root), include_project)
+    }
+
+    fn load(root: Option<&Path>, include_project: bool) -> Self {
         let native = [
             (
                 "cargo",
@@ -91,7 +100,7 @@ impl ParserRegistry {
             })
             .collect();
 
-        for dir in Self::rule_dirs() {
+        for dir in Self::rule_dirs(root, include_project) {
             if let Ok(read) = std::fs::read_dir(&dir) {
                 let mut paths: Vec<_> = read.flatten().map(|e| e.path()).collect();
                 paths.sort();
@@ -131,11 +140,16 @@ impl ParserRegistry {
         self.entries.iter().map(|e| e.name.clone()).collect()
     }
 
-    fn rule_dirs() -> Vec<std::path::PathBuf> {
+    fn rule_dirs(root: Option<&Path>, include_project: bool) -> Vec<std::path::PathBuf> {
         let mut dirs = Vec::new();
-        dirs.push(wbash_core::paths::config_dir().join("rules.d"));
-        if let Ok(cwd) = std::env::current_dir() {
-            dirs.push(cwd.join(".w-bash").join("rules.d"));
+        let config_dir = wbash_core::paths::config_dir();
+        dirs.push(config_dir.join("rules.d"));
+        dirs.push(config_dir.join("parsers.d"));
+        if include_project {
+            if let Some(root) = root {
+                dirs.push(root.join(".w-bash").join("rules.d"));
+                dirs.push(root.join(".w-bash").join("parsers.d"));
+            }
         }
         dirs
     }
