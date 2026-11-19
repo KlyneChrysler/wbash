@@ -333,8 +333,7 @@ fn diff(ctx: &mut ToolContext<'_>, a: &GitArgs) -> Result<ToolResult> {
             r.low(line.to_string());
         }
         if !summary_line.is_empty() {
-            r.header = summary_line.clone();
-            r.must(summary_line);
+            r.header = summary_line;
         } else if text.trim().is_empty() {
             r.header = "0 changed".to_string();
         } else if files > 0 {
