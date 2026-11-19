@@ -614,6 +614,7 @@ fn is_known_arg_key(key: &str) -> bool {
             | "branch"
             | "budget"
             | "cached"
+            | "calls"
             | "calls_file"
             | "content"
             | "context"
@@ -780,6 +781,20 @@ fn fill_positionals(tool: &str, obj: &mut Map<String, Value>, pos: &[String]) ->
         "check" => {
             if let Some(p) = pos.first() {
                 put("path", p);
+            }
+        }
+        "batch" => {
+            if pos.len() > 1 {
+                return Err(WErr::invalid_args(
+                    format!("{tool}: unexpected positional '{}'", pos[1]),
+                    format!("see `w {tool} --help`"),
+                ));
+            }
+            if let Some(p) = pos.first() {
+                if !obj.contains_key("calls") {
+                    let v = p.strip_prefix("calls=").unwrap_or(p);
+                    obj.insert("calls".into(), parse_scalar_for("calls", v));
+                }
             }
         }
         _ => {
