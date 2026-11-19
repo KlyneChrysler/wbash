@@ -203,11 +203,19 @@ impl Tool for SearchTool {
         let total = hits.len();
         let truncated = total > limit as usize;
         let returned = hits.len().min(limit as usize);
-        let omitted_lines: Vec<String> = hits
-            .iter()
-            .skip(returned)
-            .map(|h| format!("{}:{}: {}", h.path, h.line, h.snippet))
-            .collect();
+        let omitted_body = if truncated {
+            let mut body = String::new();
+            for h in hits.iter().skip(returned) {
+                use std::fmt::Write as _;
+                let _ = writeln!(body, "{}:{}: {}", h.path, h.line, h.snippet);
+            }
+            if body.ends_with('\n') {
+                body.pop();
+            }
+            body
+        } else {
+            String::new()
+        };
         hits.truncate(returned);
 
         let mut result = ToolResult::new(
@@ -367,8 +375,7 @@ impl Tool for SearchTool {
 
         if truncated {
             let omitted = total - returned;
-            let body = omitted_lines.join("\n");
-            let h = ctx.handles.put("search", body.as_bytes(), "text")?;
+            let h = ctx.handles.put("search", omitted_body.as_bytes(), "text")?;
             result.must(format!("...+{omitted} more ({})", h.id));
             result.handle(HandleRef {
                 id: h.id.clone(),

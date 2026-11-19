@@ -255,22 +255,23 @@ impl Tool for ReplaceTool {
         struct Planned {
             rel: String,
             abs: std::path::PathBuf,
-            replaced: usize,
             bytes: Vec<u8>,
-            diff: Vec<String>,
         }
 
+        let verbose = ctx.config.output.verbosity == "verbose";
+        const MAX_DIFF_LINES: usize = 2000;
         let mut planned: Vec<Planned> = Vec::new();
         let mut total_replacements = 0usize;
         let mut files_with_matches = 0usize;
         let mut remaining_limit = a.limit.map(|l| l as usize);
-        const MAX_DIFF_LINES: usize = 2000;
+        let mut file_summaries: Vec<String> = Vec::new();
+        let mut full_diff: Vec<String> = Vec::new();
 
         for f in candidates {
             if remaining_limit == Some(0) {
                 break;
             }
-            let Ok(tf) = wbash_index::read_text(&f.abs) else {
+            let Ok(tf) = ctx.workspace.read_cached_text(f) else {
                 continue;
             };
             if tf.binary {
@@ -302,7 +303,14 @@ impl Tool for ReplaceTool {
                 *lim = lim.saturating_sub(replaced);
             }
 
-            let diff = render_file_diff(&f.rel, &old, &new);
+            if verbose && full_diff.len() < MAX_DIFF_LINES {
+                for l in render_file_diff(&f.rel, &old, &new) {
+                    if full_diff.len() >= MAX_DIFF_LINES {
+                        break;
+                    }
+                    full_diff.push(l);
+                }
+            }
             let bytes = match tf.encoding.unwrap_or(wbash_index::TextEncoding::Utf8) {
                 enc @ (wbash_index::TextEncoding::Utf16Le
                 | wbash_index::TextEncoding::Utf16Be
@@ -312,12 +320,11 @@ impl Tool for ReplaceTool {
                     })?,
                 wbash_index::TextEncoding::Utf8 => new.as_bytes().to_vec(),
             };
+            file_summaries.push(format!("{} ({})", f.rel, replaced));
             planned.push(Planned {
                 rel: f.rel.clone(),
                 abs: f.abs.clone(),
-                replaced,
                 bytes,
-                diff,
             });
         }
 
@@ -330,19 +337,6 @@ impl Tool for ReplaceTool {
         }
 
         let files_changed = planned.len();
-        let mut file_summaries: Vec<String> = Vec::with_capacity(files_changed);
-        let mut full_diff: Vec<String> = Vec::new();
-        for p in &planned {
-            file_summaries.push(format!("{} ({})", p.rel, p.replaced));
-            if full_diff.len() < MAX_DIFF_LINES {
-                for l in &p.diff {
-                    if full_diff.len() >= MAX_DIFF_LINES {
-                        break;
-                    }
-                    full_diff.push(l.clone());
-                }
-            }
-        }
 
         if !a.dry_run {
             for p in &planned {
@@ -374,23 +368,23 @@ impl Tool for ReplaceTool {
             )
         };
         let mut result = ToolResult::new("replace", header);
-        let verbose = ctx.config.output.verbosity == "verbose";
         if verbose {
-            for l in &full_diff {
-                result.low(l.clone());
+            let truncated = full_diff.len() >= MAX_DIFF_LINES;
+            for l in full_diff {
+                result.low(l);
+            }
+            if truncated {
+                result.note("diff_truncated");
             }
         } else if files_changed <= 6 {
-            for s in &file_summaries {
-                result.low(s.clone());
+            for s in file_summaries {
+                result.low(s);
             }
         } else {
-            for s in file_summaries.iter().take(6) {
-                result.low(s.clone());
+            for s in file_summaries.iter().take(6).cloned() {
+                result.low(s);
             }
             result.low(format!("...+{} files", files_changed - 6));
-        }
-        if verbose && full_diff.len() >= MAX_DIFF_LINES {
-            result.note("diff_truncated");
         }
         result
             .meta

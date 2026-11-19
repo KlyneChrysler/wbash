@@ -37,6 +37,15 @@ pub struct WalkResult {
     pub truncated: bool,
 }
 
+impl WalkResult {
+    pub fn find(&self, rel: &str) -> Option<&FileEntry> {
+        self.files
+            .binary_search_by(|f| f.rel.as_str().cmp(rel))
+            .ok()
+            .map(|i| &self.files[i])
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct DiskCache {
     v: u32,
@@ -129,7 +138,9 @@ impl Workspace {
                 return w.clone();
             }
         }
-        let w = std::sync::Arc::new(self.load_disk().unwrap_or_else(|| self.scan()));
+        let mut w = self.load_disk().unwrap_or_else(|| self.scan());
+        w.files.sort_by(|a, b| a.rel.cmp(&b.rel));
+        let w = std::sync::Arc::new(w);
         if let Ok(mut g) = self.mem.lock() {
             *g = Some(w.clone());
         }
@@ -153,8 +164,8 @@ impl Workspace {
             return;
         }
         if let Ok(mut g) = self.content.lock() {
-            if g.len() > 80_000 {
-                g.clear();
+            if g.len() >= 80_000 {
+                return;
             }
             g.insert(rel.to_string(), (size, mtime_ms, text));
         }
@@ -198,7 +209,7 @@ impl Workspace {
 
     pub fn read_search_text_for_path(&self, rel: &str) -> std::io::Result<Arc<str>> {
         let walk = self.walk_cached_arc();
-        if let Some(entry) = walk.files.iter().find(|f| f.rel == rel) {
+        if let Some(entry) = walk.find(rel) {
             let (t, binary) = self.read_search_text(entry)?;
             if binary {
                 return Ok(Arc::from(""));
@@ -295,19 +306,26 @@ impl Workspace {
             .map(|f| {
                 let mut has = false;
                 if total < 48_000_000 && f.size <= 64_000 && !is_known_binary_ext(&f.rel) {
-                    // read small text files for warm search cache (bounded)
-                    if let Ok(tf) = read_text(&f.abs) {
+                    if let Some(cached) = self.cached_text(&f.rel, f.size, f.mtime_ms) {
+                        if cached.len() <= 64_000 {
+                            let b = cached.as_bytes();
+                            content_blob.extend_from_slice(&(b.len() as u32).to_le_bytes());
+                            content_blob.extend_from_slice(b);
+                            total += b.len();
+                            has = true;
+                        }
+                    } else if let Ok(tf) = read_text(&f.abs) {
                         if !tf.binary && tf.content.len() <= 64_000 {
                             let b = tf.content.as_bytes();
                             content_blob.extend_from_slice(&(b.len() as u32).to_le_bytes());
                             content_blob.extend_from_slice(b);
                             total += b.len();
-                            if let Ok(mut g) = self.content.lock() {
-                                g.insert(
-                                    f.rel.clone(),
-                                    (f.size, f.mtime_ms, Arc::from(tf.content.as_str())),
-                                );
-                            }
+                            self.store_content(
+                                &f.rel,
+                                f.size,
+                                f.mtime_ms,
+                                Arc::from(tf.content.as_str()),
+                            );
                             has = true;
                         }
                     }
@@ -340,12 +358,13 @@ impl Workspace {
     fn load_disk(&self) -> Option<WalkResult> {
         let path = self.cache_path.as_ref()?;
         let data = std::fs::read(path).ok()?;
-        let dc: DiskCache = serde_json::from_slice(&data).ok()?;
+        let mut dc: DiskCache = serde_json::from_slice(&data).ok()?;
         if dc.v != 2 || dc.root != self.root.to_string_lossy() {
             // v1 or mismatched: drop
             let _ = std::fs::remove_file(path.with_extension("content"));
             return None;
         }
+        dc.files.sort_by(|a, b| a.rel.cmp(&b.rel));
         for (rel, m) in &dc.dirs {
             let p = if rel == "." {
                 self.root.clone()
@@ -388,6 +407,10 @@ impl Workspace {
                     if off + len > blob.len() {
                         break;
                     }
+                    if g.len() >= 80_000 {
+                        off += len;
+                        continue;
+                    }
                     if let Ok(s) = std::str::from_utf8(&blob[off..off + len]) {
                         g.insert(f.rel.clone(), (f.size, f.mtime_ms, Arc::from(s)));
                     }
@@ -409,15 +432,15 @@ impl Workspace {
         if let Ok(mut g) = self.mem.lock() {
             if let Some(w) = g.as_mut() {
                 if let Some(walk) = Arc::get_mut(w) {
-                    if let Some(f) = walk.files.iter_mut().find(|f| f.rel == rel) {
-                        f.size = size;
-                        f.mtime_ms = mtime_ms;
+                    if let Ok(i) = walk.files.binary_search_by(|f| f.rel.as_str().cmp(rel)) {
+                        walk.files[i].size = size;
+                        walk.files[i].mtime_ms = mtime_ms;
                     }
                 } else {
                     let mut walk = (**w).clone();
-                    if let Some(f) = walk.files.iter_mut().find(|f| f.rel == rel) {
-                        f.size = size;
-                        f.mtime_ms = mtime_ms;
+                    if let Ok(i) = walk.files.binary_search_by(|f| f.rel.as_str().cmp(rel)) {
+                        walk.files[i].size = size;
+                        walk.files[i].mtime_ms = mtime_ms;
                     }
                     *w = Arc::new(walk);
                 }
