@@ -320,12 +320,6 @@ impl Workspace {
                             content_blob.extend_from_slice(&(b.len() as u32).to_le_bytes());
                             content_blob.extend_from_slice(b);
                             total += b.len();
-                            self.store_content(
-                                &f.rel,
-                                f.size,
-                                f.mtime_ms,
-                                Arc::from(tf.content.as_str()),
-                            );
                             has = true;
                         }
                     }

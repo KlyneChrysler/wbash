@@ -897,17 +897,41 @@ impl Tool for EditTool {
                     "replace=<new text>",
                 ));
             }
-            let positions: Vec<usize> = old.match_indices(find.as_str()).map(|(i, _)| i).collect();
-            match positions.len() {
-                0 => {
+            let mut it = old.match_indices(find.as_str()).map(|(i, _)| i);
+            match it.next() {
+                None => {
                     return Err(WErr::with_hint(
                         "anchor_not_found",
                         format!("anchor not found in {display}"),
                         format!("try: w read path={display} lines=1:80"),
                     ))
                 }
-                1 => {
-                    let pos = positions[0];
+                Some(pos) => {
+                    if let Some(second) = it.next() {
+                        let mut positions = vec![pos, second];
+                        let mut more = 0usize;
+                        for p in it {
+                            more += 1;
+                            if positions.len() < 5 {
+                                positions.push(p);
+                            }
+                        }
+                        let n = 2 + more;
+                        let locs: Vec<String> = positions
+                            .iter()
+                            .take(5)
+                            .map(|p| {
+                                let line = old[..*p].matches('\n').count() + 1;
+                                let col = p - old[..*p].rfind('\n').map(|i| i + 1).unwrap_or(0) + 1;
+                                format!("{line}:{col}")
+                            })
+                            .collect();
+                        return Err(WErr::with_hint(
+                            "ambiguous_anchor",
+                            format!("{n} matches in {display} at {}", locs.join(", ")),
+                            format!("try: w read path={display} lines=<start>:<end>"),
+                        ));
+                    }
                     let mut new = String::with_capacity(old.len() + replace.len());
                     new.push_str(&old[..pos]);
                     new.push_str(&replace);
@@ -915,22 +939,6 @@ impl Tool for EditTool {
                     let ins = replace.lines().count().max(1);
                     let del = find.lines().count().max(1);
                     (new, ins, del)
-                }
-                n => {
-                    let locs: Vec<String> = positions
-                        .iter()
-                        .take(5)
-                        .map(|p| {
-                            let line = old[..*p].matches('\n').count() + 1;
-                            let col = p - old[..*p].rfind('\n').map(|i| i + 1).unwrap_or(0) + 1;
-                            format!("{line}:{col}")
-                        })
-                        .collect();
-                    return Err(WErr::with_hint(
-                        "ambiguous_anchor",
-                        format!("{n} matches in {display} at {}", locs.join(", ")),
-                        format!("try: w read path={display} lines=<start>:<end>"),
-                    ));
                 }
             }
         } else {

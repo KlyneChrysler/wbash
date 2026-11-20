@@ -102,8 +102,9 @@ impl HandleStore {
         self.append_record_locked(&rec)?;
         self.handles.insert(id.clone(), rec);
         self.evict_if_needed_locked()?;
-        if !self.handles.contains_key(&id) {
+        if self.total_bytes() > self.max_bytes || !self.handles.contains_key(&id) {
             let _ = std::fs::remove_file(self.blob_path(&id));
+            self.remove_locked(&id);
             self.rewrite_manifest_locked()?;
             return Err(WErr::with_hint(
                 "handle_too_large",

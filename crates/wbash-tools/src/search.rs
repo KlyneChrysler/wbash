@@ -274,6 +274,19 @@ impl Tool for SearchTool {
                 )
             },
         );
+        result
+            .meta
+            .counts
+            .insert("files".into(), stats.files_with_hits as i64);
+        result.meta.counts.insert("matches".into(), total as i64);
+        result
+            .meta
+            .counts
+            .insert("returned".into(), returned as i64);
+        result
+            .meta
+            .counts
+            .insert("scanned".into(), stats.scanned_files as i64);
         ctx.ledger.record_search(
             cache_key,
             SearchSeen {
@@ -285,14 +298,14 @@ impl Tool for SearchTool {
         );
         if total == 1
             && !truncated
+            && !alt_matched
             && !stats.fallback
             && !walk.truncated
             && stats.skipped_binary == 0
             && a.context == 0
         {
             if let Some(h) = hits.first() {
-                let line = format!("{}:{}: {}", h.path, h.line, h.snippet);
-                result.header = line;
+                result.header = format!("{}:{}: {}", h.path, h.line, h.snippet);
                 result.items.clear();
                 return Ok(result);
             }
@@ -320,16 +333,18 @@ impl Tool for SearchTool {
 
         let mut file_order: Vec<String> = Vec::new();
         let mut by_file: HashMap<String, Vec<Hit>> = HashMap::new();
-        for h in &hits {
-            if !by_file.contains_key(&h.path) {
+        for h in hits.drain(..) {
+            let e = by_file.entry(h.path.clone()).or_insert_with(|| {
                 file_order.push(h.path.clone());
-                by_file.insert(h.path.clone(), Vec::new());
-            }
-            by_file.get_mut(&h.path).unwrap().push(h.clone());
+                Vec::new()
+            });
+            e.push(h);
         }
 
         for path in &file_order {
-            let mut fhits = by_file.remove(path).unwrap();
+            let Some(mut fhits) = by_file.remove(path) else {
+                continue;
+            };
             fhits.sort_by(|a, b| a.line.cmp(&b.line).then(a.col.cmp(&b.col)));
             let grouped = fhits.len() >= 3;
             if grouped {
@@ -434,19 +449,6 @@ impl Tool for SearchTool {
             });
         }
 
-        result
-            .meta
-            .counts
-            .insert("files".into(), stats.files_with_hits as i64);
-        result.meta.counts.insert("matches".into(), total as i64);
-        result
-            .meta
-            .counts
-            .insert("returned".into(), returned as i64);
-        result
-            .meta
-            .counts
-            .insert("scanned".into(), stats.scanned_files as i64);
         Ok(result)
     }
 }
