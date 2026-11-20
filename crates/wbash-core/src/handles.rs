@@ -167,6 +167,43 @@ impl HandleStore {
         Ok((bytes, rec))
     }
 
+    pub fn has_fresh(&mut self, id: &str) -> bool {
+        let _lock = match self.lock(false) {
+            Ok(l) => l,
+            Err(_) => return false,
+        };
+        if self.reload_manifest_if_changed().is_err() {
+            return false;
+        }
+        let Some(rec) = self.handles.get(id) else {
+            return false;
+        };
+        let now = now_ms();
+        if now > rec.expires_ms {
+            drop(_lock);
+            if let Ok(_x) = self.lock(true) {
+                let _ = self.reload_manifest_if_changed();
+                let stale = self.handles.get(id).is_none_or(|r| now_ms() > r.expires_ms);
+                if stale {
+                    self.remove_locked(id);
+                    let _ = self.rewrite_manifest_locked();
+                }
+            }
+            return false;
+        }
+        let blob = self.blob_path(id);
+        if std::fs::metadata(&blob).is_ok() {
+            return true;
+        }
+        drop(_lock);
+        if let Ok(_x) = self.lock(true) {
+            let _ = self.reload_manifest_if_changed();
+            self.remove_locked(id);
+            let _ = self.rewrite_manifest_locked();
+        }
+        false
+    }
+
     pub fn session_hash(&self) -> &str {
         &self.session_hash
     }

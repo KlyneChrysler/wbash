@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -139,12 +138,12 @@ impl Tool for SearchTool {
             .search_entry(&cache_key, ctx.config.session.ledger_ttl_secs, now_ms())
             .cloned()
         {
-            let snap_ok = seen
+            let snap_id = seen
                 .snapshot_ref
                 .as_deref()
-                .map(|id| ctx.handles.get(id).is_ok())
-                .unwrap_or(false);
-            let header = if let (Some(id), true) = (&seen.snapshot_ref, snap_ok) {
+                .filter(|id| ctx.handles.has_fresh(id))
+                .map(|s| s.to_string());
+            let header = if let Some(id) = snap_id {
                 format!(
                     "unchanged search ({}, {}) expand {}",
                     util::plural(seen.files, "file"),
@@ -328,8 +327,8 @@ impl Tool for SearchTool {
             ));
         }
 
-        let mut context_cache: HashMap<String, Arc<str>> = HashMap::new();
         let mut context_lines: Vec<String> = Vec::new();
+        let mut context_line_cache: HashMap<String, Vec<String>> = HashMap::new();
 
         let mut file_order: Vec<String> = Vec::new();
         let mut by_file: HashMap<String, Vec<Hit>> = HashMap::new();
@@ -412,13 +411,15 @@ impl Tool for SearchTool {
                     ));
                 }
                 if a.context > 0 {
-                    let text = context_cache.entry(hit.path.clone()).or_insert_with(|| {
-                        ctx.workspace
-                            .read_search_text_for_path(&hit.path)
-                            .unwrap_or_else(|_| Arc::from(""))
-                    });
-                    if !text.is_empty() {
-                        let all: Vec<&str> = text.lines().collect();
+                    let all = context_line_cache
+                        .entry(hit.path.clone())
+                        .or_insert_with(|| {
+                            ctx.workspace
+                                .read_search_text_for_path(&hit.path)
+                                .map(|t| t.lines().map(|s| s.trim_end().to_string()).collect())
+                                .unwrap_or_default()
+                        });
+                    if !all.is_empty() {
                         let lo = (hit.line as usize).saturating_sub(a.context as usize + 1);
                         let hi = ((hit.line as usize) + a.context as usize).min(all.len());
                         for (k, l) in all.iter().enumerate().take(hi).skip(lo) {
