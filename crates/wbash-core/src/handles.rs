@@ -142,17 +142,28 @@ impl HandleStore {
             ));
         }
         let blob = self.blob_path(id);
-        let bytes = std::fs::read(&blob).map_err(|_| {
-            WErr::with_hint(
-                "handle_expired",
-                format!("handle '{id}' payload is gone"),
-                "re-run the tool that produced it",
-            )
-        })?;
-        let rec = HandleRecord {
+        let bytes = match std::fs::read(&blob) {
+            Ok(b) => b,
+            Err(_) => {
+                drop(_lock);
+                let _x = self.lock(true)?;
+                self.reload_manifest_if_changed()?;
+                self.remove_locked(id);
+                self.rewrite_manifest_locked()?;
+                return Err(WErr::with_hint(
+                    "handle_expired",
+                    format!("handle '{id}' payload is gone"),
+                    "re-run the tool that produced it",
+                ));
+            }
+        };
+        if let Some(h) = self.handles.get_mut(id) {
+            h.last_access_ms = now;
+        }
+        let rec = self.handles.get(id).cloned().unwrap_or(HandleRecord {
             last_access_ms: now,
             ..rec
-        };
+        });
         Ok((bytes, rec))
     }
 
