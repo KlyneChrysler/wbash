@@ -491,17 +491,49 @@ fn trust_file() -> PathBuf {
     paths::cache_dir().join("config").join("trust.json")
 }
 
-fn trust_set() -> Vec<String> {
+fn trust_set_unlocked() -> Vec<String> {
     std::fs::read_to_string(trust_file())
         .ok()
         .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
         .unwrap_or_default()
 }
 
+fn with_trust_lock<T>(f: impl FnOnce() -> T) -> T {
+    let path = trust_file();
+    if let Some(parent) = path.parent() {
+        let _ = paths::ensure_private_dir(parent);
+    }
+    let lock_path = path.with_extension("lock");
+    if let Ok(lock_file) = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+    {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = lock_file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            let rc = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
+            if rc == 0 {
+                let out = f();
+                unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_UN) };
+                return out;
+            }
+        }
+    }
+    f()
+}
+
 pub fn is_trusted(root: &Path) -> bool {
     let root = paths::canonicalize_lenient(root).unwrap_or_else(|_| root.to_path_buf());
     let key = hash::hash_str(&root.to_string_lossy());
-    trust_set().contains(&key)
+    with_trust_lock(|| trust_set_unlocked().contains(&key))
 }
 
 pub fn trust_root(root: &Path) -> Result<()> {
@@ -512,42 +544,44 @@ pub fn trust_root(root: &Path) -> Result<()> {
         )
     })?;
     let key = hash::hash_str(&root.to_string_lossy());
-    let mut set = trust_set();
-    if !set.contains(&key) {
-        set.push(key);
-    }
-    let path = trust_file();
-    if let Some(parent) = path.parent() {
-        paths::ensure_private_dir(parent).map_err(WErr::from)?;
-    }
-    let bytes = serde_json::to_vec_pretty(&set)?;
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
-    let res = (|| -> std::io::Result<()> {
-        use std::io::Write;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+    with_trust_lock(|| {
+        let mut set = trust_set_unlocked();
+        if !set.contains(&key) {
+            set.push(key);
         }
-        f.write_all(&bytes)?;
-        f.sync_all()?;
-        Ok(())
-    })();
-    if let Err(e) = res {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(WErr::from(e));
-    }
-    std::fs::rename(&tmp, &path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        WErr::from(e)
+        let path = trust_file();
+        if let Some(parent) = path.parent() {
+            paths::ensure_private_dir(parent).map_err(WErr::from)?;
+        }
+        let bytes = serde_json::to_vec_pretty(&set)?;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
+        let res = (|| -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+            }
+            f.write_all(&bytes)?;
+            f.sync_all()?;
+            Ok(())
+        })();
+        if let Err(e) = res {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(WErr::from(e));
+        }
+        std::fs::rename(&tmp, &path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            WErr::from(e)
+        })
     })
 }
 

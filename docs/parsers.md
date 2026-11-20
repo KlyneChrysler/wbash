@@ -43,10 +43,9 @@ argv_contains = ["run"]
 
 [inject]
 args = ["--json"]
-inject_if_absent = "--json"
 
 [parse]
-format = "jsonl"            # json | jsonl | text
+format = "jsonl"            # json | jsonl
 
 [map.test_result]
 id = "$.name"
@@ -60,8 +59,7 @@ bad = "fail"
 
 - `match.argv0` is required; `argv_contains` is optional.
 - Injection appends missing arguments once; they are never duplicated.
-- `format="text"` with a `line_regex` captures named groups into the same map
-  keys.
-- Invalid rule files are ignored with a startup warning; rules never override
-  built-in parsers for the same argv0 unless priority is lower.
+- `format` supports `json` and `jsonl`.
+- Rule files must be regular (non-symlink) TOML files, size-limited and validated; invalid rules are ignored with a startup warning.
+- Project rules are loaded only for trusted roots. Rules never override built-in parsers for the same argv0 unless priority is lower.
 - Declarative parsers cannot execute code. WASM parsers are deferred to v2.

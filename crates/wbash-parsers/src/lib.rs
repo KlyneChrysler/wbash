@@ -108,6 +108,18 @@ impl ParserRegistry {
                     if path.extension().and_then(|e| e.to_str()) != Some("toml") {
                         continue;
                     }
+                    match std::fs::symlink_metadata(&path) {
+                        Ok(m) if m.file_type().is_symlink() => {
+                            eprintln!("# parser rule {} ignored: symlink", path.display());
+                            continue;
+                        }
+                        Ok(m) if !m.file_type().is_file() => continue,
+                        Err(e) => {
+                            eprintln!("# parser rule {} ignored: {e}", path.display());
+                            continue;
+                        }
+                        _ => {}
+                    }
                     match TomlParser::load(&path) {
                         Ok(p) => entries.push(ParserEntry {
                             name: p.name.clone(),
@@ -1091,6 +1103,21 @@ pub struct TomlTestMap {
 
 impl TomlParser {
     pub fn load(path: &Path) -> wbash_core::Result<Self> {
+        let meta = std::fs::symlink_metadata(path).map_err(|e| {
+            wbash_core::WErr::new("invalid_config", format!("parser {}: {e}", path.display()))
+        })?;
+        if !meta.file_type().is_file() {
+            return Err(wbash_core::WErr::new(
+                "invalid_config",
+                format!("parser {}: not a regular file", path.display()),
+            ));
+        }
+        if meta.len() > 64 * 1024 {
+            return Err(wbash_core::WErr::new(
+                "invalid_config",
+                format!("parser {}: rule too large", path.display()),
+            ));
+        }
         let text = std::fs::read_to_string(path).map_err(|e| {
             wbash_core::WErr::new("invalid_config", format!("parser {}: {e}", path.display()))
         })?;
@@ -1103,6 +1130,18 @@ impl TomlParser {
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default();
         }
+        p.name = p.name.trim().to_string();
+        if p.name.is_empty()
+            || p.name.len() > 64
+            || has_bad_token(&p.name)
+            || p.name.contains('/')
+            || p.name.contains('\\')
+        {
+            return Err(wbash_core::WErr::invalid_args(
+                "invalid parser name",
+                "use a short plain rule name",
+            ));
+        }
         if p.schema_version != 1 {
             return Err(wbash_core::WErr::invalid_args(
                 format!(
@@ -1112,18 +1151,62 @@ impl TomlParser {
                 "schema_version=1",
             ));
         }
-        if p.r#match.argv0.trim().is_empty() {
+        p.r#match.argv0 = p.r#match.argv0.trim().to_string();
+        if p.r#match.argv0.is_empty()
+            || p.r#match.argv0.len() > 128
+            || has_bad_token(&p.r#match.argv0)
+        {
             return Err(wbash_core::WErr::invalid_args(
                 "parser match.argv0 is required",
                 "match.argv0=<command>",
             ));
         }
-        if !p.parse.format.is_empty()
-            && !matches!(p.parse.format.as_str(), "json" | "jsonl" | "text")
-        {
+        if p.r#match.argv_contains.len() > 16 {
+            return Err(wbash_core::WErr::invalid_args(
+                "too many match.argv_contains entries",
+                "limit argv_contains to 16 items",
+            ));
+        }
+        for s in &mut p.r#match.argv_contains {
+            *s = s.trim().to_string();
+            if s.is_empty() || s.len() > 128 || has_bad_token(s) {
+                return Err(wbash_core::WErr::invalid_args(
+                    "invalid match.argv_contains entry",
+                    "use short plain argv tokens",
+                ));
+            }
+        }
+        p.parse.format = p.parse.format.trim().to_ascii_lowercase();
+        if p.parse.format.is_empty() {
+            p.parse.format = "json".to_string();
+        }
+        if !matches!(p.parse.format.as_str(), "json" | "jsonl") {
             return Err(wbash_core::WErr::invalid_args(
                 format!("unsupported parser parse.format '{}'", p.parse.format),
-                "parse.format=json|jsonl|text",
+                "parse.format=json|jsonl",
+            ));
+        }
+        if p.inject.args.len() > 16 {
+            return Err(wbash_core::WErr::invalid_args(
+                "too many inject args",
+                "limit inject.args to 16 items",
+            ));
+        }
+        for a in &p.inject.args {
+            if a.is_empty() || a.len() > 256 || has_bad_token(a) {
+                return Err(wbash_core::WErr::invalid_args(
+                    "invalid inject arg",
+                    "use short plain argv flags/values",
+                ));
+            }
+        }
+        if p.priority.abs() > 10_000 {
+            p.priority = p.priority.clamp(-10_000, 10_000);
+        }
+        if p.map.status.len() > 64 {
+            return Err(wbash_core::WErr::invalid_args(
+                "too many map.status entries",
+                "limit map.status to 64 items",
             ));
         }
         p.inject_args = p.inject.args.clone();
@@ -1264,4 +1347,8 @@ fn value_to_string(v: &Value) -> String {
         Value::Null => String::new(),
         other => other.to_string(),
     }
+}
+
+fn has_bad_token(s: &str) -> bool {
+    s.chars().any(|c| c == '\0' || c.is_control())
 }

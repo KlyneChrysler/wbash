@@ -13,11 +13,10 @@
 
 ## Trust
 
-- Project config (`.w-bash/config.toml`) and project rules/parsers are loaded
-  only after the root is trusted.
-- `w config show` prints effective config; `w config trust` records the
-  canonical root in the user config.
+- Project config (`.w-bash/config.toml`) and project rules/parsers are loaded only after the root is trusted.
+- `w config show` prints effective config; `w config trust` records the canonical root in the user config (locked for cross-process updates).
 - Untrusted project configuration is ignored, with an advisory note.
+- TOML parser rules are trusted-root only, validated, size-limited, and must be regular files (symlinks ignored).
 
 ## Tiers
 

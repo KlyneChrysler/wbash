@@ -343,9 +343,9 @@ impl Workspace {
             truncated: w.truncated,
         };
         if let Ok(data) = serde_json::to_vec(&dc) {
-            let _ = std::fs::write(path, data);
+            write_atomic_best_effort(path, &data);
             let cpath = path.with_extension("content");
-            let _ = std::fs::write(cpath, content_blob);
+            write_atomic_best_effort(&cpath, &content_blob);
         }
     }
 
@@ -440,10 +440,39 @@ impl Workspace {
                 }
             }
         }
-        if let Some(p) = &self.cache_path {
-            let _ = std::fs::remove_file(p);
+        if !self.update_disk_file_meta(rel, size, mtime_ms) {
+            if let Some(p) = &self.cache_path {
+                let _ = std::fs::remove_file(p);
+                let _ = std::fs::remove_file(p.with_extension("content"));
+            }
+        } else if let Some(p) = &self.cache_path {
             let _ = std::fs::remove_file(p.with_extension("content"));
         }
+    }
+
+    fn update_disk_file_meta(&self, rel: &str, size: u64, mtime_ms: i64) -> bool {
+        let Some(path) = &self.cache_path else {
+            return false;
+        };
+        let Ok(data) = std::fs::read(path) else {
+            return false;
+        };
+        let Ok(mut dc) = serde_json::from_slice::<DiskCache>(&data) else {
+            return false;
+        };
+        if dc.v != 2 || dc.root != self.root.to_string_lossy() {
+            return false;
+        }
+        let Some(f) = dc.files.iter_mut().find(|f| f.rel == rel) else {
+            return false;
+        };
+        f.size = size;
+        f.mtime_ms = mtime_ms;
+        let Ok(out) = serde_json::to_vec(&dc) else {
+            return false;
+        };
+        write_atomic_best_effort(path, &out);
+        true
     }
 
     /// Invalidate in-memory and on-disk cache (e.g. after writes).
@@ -458,6 +487,45 @@ impl Workspace {
             let _ = std::fs::remove_file(p);
             let _ = std::fs::remove_file(p.with_extension("content"));
         }
+    }
+}
+
+fn write_atomic_best_effort(path: &Path, bytes: &[u8]) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = parent.join(format!(
+        ".{}.wbash-tmp-{}-{nonce}",
+        path.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "cache".to_string()),
+        std::process::id()
+    ));
+    let write = || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        Ok(())
+    };
+    if write().is_ok() {
+        if std::fs::rename(&tmp, path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    } else {
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
